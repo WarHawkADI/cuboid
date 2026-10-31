@@ -524,6 +524,7 @@ func (c *Core) stream(ctx context.Context, slot string, start pglogrepl.LSN) err
 }
 
 func (c *Core) onFlush(res *flush.Result) {
+	c.Alarms.Clear("flush_failed") // this flush committed, so the failure is over
 	c.Hist.Record(res.Versions, res.Touched)
 	c.Hub.Notify()
 	for _, ev := range res.Rebuilt {
