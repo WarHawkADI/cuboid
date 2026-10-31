@@ -1,6 +1,6 @@
 # Final report
 
-Cuboid works end to end on the native stack at 10M orders and 100 stores, with all PRD features and bonuses built. Three of the build specification's demands stay open, listed plainly below: the Docker path has never run, the organisers' script has not arrived, and one query misses the speed and growth targets.
+Cuboid works end to end on the native stack at 10M orders and 100 stores, with all PRD features and bonuses built. Two of the build specification's demands stay open, listed plainly below: a clean-clone start of the Docker path has not been recorded, and the organisers' script has not arrived. Every PRD target is met, at Good or better.
 
 ## PRD scorecard
 Measured on one laptop on 31 October 2026. Every service shares its 12 logical CPUs and 15.6 GB of RAM.
@@ -21,7 +21,7 @@ Measured on one laptop on 31 October 2026. Every service shares its 12 logical C
 | T3 Safety | **Good.** App p95 0.99 to 1.16 ms with 1,000 dashboards, +17.5%. Against Cuboid stopped (0.91 ms), +28.4%. Direct: 104 ms | `artifacts/safety/main.json` |
 | T4 Correctness | **Great.** 2,500 of 2,500, 500 during writes | `artifacts/correctness/main.json` |
 | T5 Growth | **Good.** Top customers 3.7x, down from 13.7x with month totals (ADR-011). Other queries 1.2x to 3.2x on the largest store | `artifacts/growth/latest.json` |
-| Runs from the README with Docker | **Not tested** | Docker Desktop is broken on this machine |
+| Runs from the README with Docker | **Partly shown:** the Compose stack builds, seeds 1M and 10M, rebuilds and benchmarks on Linux. No clean-clone run recorded | `make docker-clean-clone-check` |
 | Crash recovery | 20 `kill -9`s under writes: back within 3.1 s, 500 of 500 checks exact | `artifacts/chaos/main.json` |
 
 ## How to run it
@@ -34,7 +34,7 @@ See `README.md`. On this machine: `tools/devdb.sh up`, `tools/stack.sh up`, then
 The data, the store app's traffic and the dashboards' traffic. Replication, rollups, checks against the main database and the drills' injected faults are real. SOC alerts are synthetic.
 
 ## Known risks, most serious first
-1. **The Docker quick start has never run.** Judges may start there. Repair Docker Desktop (it crashes on a missing registry key, `SOFTWARE\Docker Inc.\Docker Desktop`), then run `make docker-clean-clone-check`. Until then, present from this laptop.
+1. **A clean-clone Docker start is not recorded.** The Compose stack has run (image build, 1M and 10M seeds, rebuilds, `bench`) on a Linux machine, and Docker Desktop on the build machine is reported working. Judges may start from the README's Docker path, so run `make docker-clean-clone-check` once and record the result.
 2. **The organisers' script has not arrived.** When it does, follow `provided/README.md` and re-measure. If it targets MongoDB, no adapter exists.
 3. **Top customers** is Good, not Great, on T5: 3.7x. It now ranks through each customer's month totals and reads a few hundred customers (ADR-011), without touching the exactly-once flush path. A list with a filter, or over more than three months, still ranks every customer, as before.
 4. **Moving ranges lag under load.** Under heavy dashboard load a preset such as `last_7d` refreshes about every 5 seconds, and at most every second otherwise. Answers are served with their true age and stay exact as of that age. Fixed ranges are not throttled.

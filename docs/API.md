@@ -65,4 +65,6 @@ Open routes: `/monitor` (the page), `/api/monitor/state`, `/api/scorecard`, `/me
 }
 ```
 
+`meta.plan.top_bound` appears on a top-N list that was found by walking month totals instead of ranking every key (ADR-011): `{"rollup": "customer_month", "months_from_cells": 2, "slices_from_mirror": 2, "depth": 640, "keys_read": 1280}`. `keys_read` is how many keys it summed exactly. The answer is the same as ranking every key. When it is absent, every key was ranked.
+
 `meta.cache` is `hit`, `miss`, `coalesced` (shared another request's computation) or `stale`. A `stale` answer is the newest held, exact as of its `as_of`, with `freshness.stale` set to true. It is served for up to 2 seconds while a refresh runs, or for longer if the store cannot answer in time.

@@ -1,6 +1,6 @@
 # Requirements traceability
 
-Every line of the PRD and the problem deck, the component that serves it, what proves it, and its status. "Native" means the local Postgres stack, since the Docker path has not been run yet.
+Every line of the PRD and the problem deck, the component that serves it, what proves it, and its status. "Native" means the local Postgres stack. The Docker path has since run on a Linux machine (build, seeds, rebuilds, `bench`), without a recorded clean-clone start.
 
 Status: **Proven** (a run in this project shows it), **Partial** (works, but something the requirement asks for is missing), **Not proven** (no run shows it yet).
 
@@ -12,14 +12,14 @@ Status: **Proven** (a run in this project shows it), **Partial** (works, but som
 | Safe for the database | Separate store; query path holds no main-database connection | `bench safety` | See `docs/TARGETS.md` |
 | Separate tenants | Six checks, `docs/ISOLATION.md` | `bench isolation`, `bench redteam`, D9, D17 | See below |
 | Correct | Engine, mirror edges, fenced verify | `bench correctness`, model test | See `docs/TARGETS.md` |
-| Scales 10 times | Rollups grow with buckets, not rows | `bench growth` | See `docs/TARGETS.md` |
+| Scales 10 times | Rollups grow with buckets, not rows; top customers through month totals (ADR-011) | `bench growth` | See `docs/TARGETS.md` |
 
 ## Must have
 | ID | Requirement | Component | Proof | Status |
 |---|---|---|---|---|
 | FR-1 | Counts and totals for a time range | `orders/count`, `orders/summary` | D1, D8 | Proven |
 | FR-2 | Trend per hour or per day | `orders/trend` | D2 | Proven |
-| FR-3 | Top-N list | `products/top`, `customers/top`, `cities/top` | D3; each check proves the pushed-down list against the full result | Proven |
+| FR-3 | Top-N list | `products/top`, `customers/top`, `cities/top` | D3; each check proves the pushed-down list against the full result; `internal/query/rank_test.go` proves the month-totals walk equals ranking every key | Proven |
 | FR-4 | Breakdown by category | `orders/breakdown` | D4 | Proven |
 | FR-5 | Tenant filter on every query | `internal/auth`, row security, guard | D9, D10, D17, `bench isolation` | Proven: 1,000,000 requests at 10M, 0 crossed |
 | FR-6 | New data shows up, including updates | CDC, engine retractions | D5, D6, D7 | Proven |
@@ -40,7 +40,7 @@ Status: **Proven** (a run in this project shows it), **Partial** (works, but som
 | 1M records, 10 tenants | `cmd/seed --tier small` | Seeded and measured | Proven |
 | 10M records, 100 tenants, a few much bigger | `cmd/seed --tier main` | Largest store 19.3%, smallest 19,278 orders | Proven |
 | Organisers' script generates the data | `provided/` is empty | | Not proven: the script has not been received |
-| Starts by following the README; Docker Compose a plus | `docker-compose.yml`, `Dockerfile` | | Not proven: Docker Desktop is broken on the build machine, so Compose has never run |
+| Starts by following the README; Docker Compose a plus | `docker-compose.yml`, `Dockerfile` | | Partial: the stack builds, seeds 1M and 10M, rebuilds and benchmarks through Compose on Linux; no clean-clone run recorded |
 
 ## Problem deck
 | Line | Proof | Status |

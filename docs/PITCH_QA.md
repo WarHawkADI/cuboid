@@ -28,6 +28,6 @@ The hardest questions we expect, each with a short answer and where to show it.
 
 13. **Could it serve our SOC data?** The `soc_alerts` table runs on the same engine through config, with its numbers matching the main database. It is synthetic data. *Show: `config/metrics.yaml`.*
 
-14. **Can I run this myself?** The native path is what we measured on. The Compose files are written, but Docker was broken on our machine, so that path has not been run. *Show: README.*
+14. **Can I run this myself?** Yes: `docker compose up -d --build`, then the seed. The Compose stack has run end to end on a Linux machine (build, 1M and 10M seeds, rebuilds, benchmarks); a start from a clean clone has not been recorded yet. *Show: README.*
 
 15. **How much of this did AI write?** Most of it: Claude Code, working to our specification and direction. It is stated in `docs/DISCLOSURE.md`. *Be ready to explain any file yourself.*

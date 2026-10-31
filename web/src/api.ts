@@ -29,6 +29,14 @@ export interface PlanInfo {
   edges: { from: string; to: string }[];
   cells_estimate: number;
   edge_rows_estimate: number;
+  // Set when a top-N list was found by walking month totals (ADR-011).
+  top_bound?: {
+    rollup: string;
+    months_from_cells: number;
+    slices_from_mirror: number;
+    depth: number;
+    keys_read: number;
+  };
 }
 
 export interface Envelope<T> {

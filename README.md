@@ -62,7 +62,7 @@ Then open <http://localhost:8080/monitor>. The seed loads 1M orders across 10 st
 
 Settings can be changed through `.env`; see `.env.example`. The organisers' data script goes in `provided/`; see `provided/README.md`.
 
-**Status of this path:** Docker Desktop was broken on the machine this was built on, so the Compose files have not been run yet. Everything below was measured on the native path, with the same Postgres version, settings and ports:
+**Status of this path:** the Compose stack has run on a Linux machine with Docker Engine on 31 October 2026: image build, the 1M and 10M seeds, Cuboid's rebuilds from them, and the `bench` profile. Docker Desktop on the Windows build machine is reported working again. A start from a clean clone (`make docker-clean-clone-check`) has not been recorded. The 12-CPU measurements from before 31 October used the native path below, with the same Postgres version, settings and ports:
 
 ```
 tools/devdb.sh up          # two Postgres 16 clusters; set PGBIN to its bin directory
@@ -202,7 +202,7 @@ Also measured at 10M: 1,000,000 randomized requests with 0 crossing stores, and 
 | B-1 Freshness | `freshness` in every response: `"updated": "updated 1 second ago"` |
 | B-2 Rebuild from scratch | Controls on `/monitor`: from the mirror with no main-database load, or from main. Queries keep answering; on a rebuild from main the stream pauses and answers show their true age |
 | B-3 Heavy-query limit | "Flood heavy queries" on `/monitor`: the flooding store gets 429s, others' p99 stayed flat |
-| B-4 Metric by config | Add a rollup to `config/metrics.yaml` while running. It builds from the mirror and is served without a restart |
+| B-4 Metric by config | Add a rollup to `config/metrics.yaml` while running. It builds from the mirror and is served without a restart. A `rank: true` rollup (see `customer_month`) speeds up a top-N list, and a measure declared `nonnegative: true` is checked against the main database's `CHECK` constraints |
 | B-5 Monitoring page | `/monitor` |
 
 The same engine serves a second dataset through config alone: press **SOC alerts** on a store page.
@@ -236,6 +236,9 @@ sequenceDiagram
   C->>M: Confirm the LSN, so its WAL can be freed
   Note over C,A: A crash before COMMIT applies nothing. After it, the applied LSN says where to resume.
 ```
+
+### Top customers without reading every customer
+A customer list used to read one cell per customer and day in the range, so it grew with the store: 13.7x from 1M to 10M orders. A rank rollup now keeps each customer's total per month. The range splits into whole-month cells plus thin signed slices of rows, and a walk down each month's largest cells stops once no one else can reach the n-th total. It reads a few hundred customers and returns the same list as ranking all of them, ties included. `meta.plan.top_bound` shows when it ran. The proof and the limits are in [ADR-011](docs/adr/ADR-011-exact-top-n.md).
 
 ### Any time range, exact
 <p align="center"><img src="docs/img/range-slice.svg" alt="A range is tiled with mirror edges, hours, days and months" width="100%"></p>

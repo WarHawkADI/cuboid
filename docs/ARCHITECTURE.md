@@ -40,6 +40,7 @@ The applied LSN commits in the same transaction as the data, and only that commi
 - When new data arrives, a request gets the last answer, labelled `stale` with its true `as_of`, while one background refresh runs: for up to 2 seconds on a fixed range, and up to 30 seconds on a moving preset (see Moving ranges under load).
 - If the store cannot answer in time, for example at the peak of a rebuild, the newest answer held is served with its true age.
 - Top-N lists keyed by product or customer rank in SQL by one measure, and take the total for shares from a smaller rollup. Each verification checks this against the full result of the same snapshot.
+- Top customers, whose cost grew with the store (13.7x from 1M to 10M orders), is answered through a rank rollup: each customer's total per month, indexed by value. The range splits into whole-month cells plus thin signed slices of mirror rows. A walk down each month's largest cells, summing every customer it meets, stops once no one unseen can reach the n-th total, so it reads a few hundred customers and stays exact. A filtered list, a range of more than three months, or a walk past its work budget ranks every customer as before. `meta.plan.top_bound` says which path ran. See ADR-011.
 
 ## Failure modes
 | Failure | What happens |

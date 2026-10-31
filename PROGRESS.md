@@ -1,6 +1,6 @@
 # Cuboid — Progress
 Started: 2026-10-31 12:18 IST   Deadline: 2026-11-01 23:59 IST (no demo slot given)   Last update: 2026-10-31 19:30 IST
-Machine: 12 logical CPUs / 15.6 GB RAM / about 60 GB free / Windows 11. Docker Desktop is broken on this machine (see Blocked).
+Machine: 12 logical CPUs / 15.6 GB RAM / about 60 GB free / Windows 11. Docker Desktop was broken on this machine (see Blocked); it is reported working again.
 Data source: fallback generator (PENDING: organisers' script; provided/ is empty)
 Tiers seeded: dev 2 s, small 7 s, main 1m45s. First load of main into Cuboid: 3m25s copy + 6m11s rollups.
 Running on: native Postgres 16.4 (tools/devdb.sh) and native services (tools/stack.sh), same settings and ports as docker-compose.yml.
@@ -34,7 +34,7 @@ Presentation. Next: repair Docker and run `make docker-clean-clone-check`.
 - 13:05 model test: cell went negative | generator deleted one order twice in a txn; generator bug
 
 ## Blocked / deferred
-- Docker Desktop backend crashes: `cannot find registry key "SOFTWARE\Docker Inc.\Docker Desktop"`. Needs a repair or reinstall with admin rights by the team. Until then the README's Docker path is untested.
+- Docker Desktop backend crashes: `cannot find registry key "SOFTWARE\Docker Inc.\Docker Desktop"`. Reported fixed. The Compose stack has since run on a Linux machine; a clean-clone check is still to be recorded.
 
 ## Regression tests still owed (spec 17.5)
 Bugs found against real Postgres need database-level tests: CHECK before ON CONFLICT, COPY under RLS, reload removing a rollup, dimension loader using the index, drill B shape. demo-check covers some of these end to end, and `tests/e2e_test.go` covers the order lifecycle.
