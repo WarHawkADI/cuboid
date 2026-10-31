@@ -399,6 +399,13 @@ func (c *Core) streamLoop(ctx context.Context) error {
 			continue
 		default:
 		}
+		if c.Emitter.Loading(ctx) {
+			if c.State() != "waiting for the data load" {
+				c.setState("waiting for the data load")
+			}
+			time.Sleep(2 * time.Second)
+			continue
+		}
 		var slot, applied string
 		var backfilled *time.Time
 		if err := c.Store.W.QueryRow(ctx, "SELECT coalesce(slot, ''), applied_lsn::text, backfilled_at FROM cdc_state").Scan(&slot, &applied, &backfilled); err != nil {

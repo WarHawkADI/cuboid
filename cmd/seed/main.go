@@ -105,6 +105,7 @@ func main() {
 	start := time.Now()
 	plans := planStores(t, *seed)
 	fmt.Printf("Seeding tier %s: %d orders across %d stores, history to %s (seed %d)\n", *tierName, t.orders, len(plans), anchor.Format(time.RFC3339), *seed)
+	must(announceLoad(ctx, pool, true))
 	must(prepare(ctx, pool))
 	must(insertStores(ctx, pool, plans))
 	curve := newCurve(anchor)
@@ -143,6 +144,7 @@ func main() {
 	loadTime := time.Since(start)
 	fmt.Printf("Loaded %d rows in %s; building indexes\n", loaded.Load(), loadTime.Round(time.Second))
 	must(finish(ctx, pool, *analytics))
+	must(announceLoad(ctx, pool, false))
 	fmt.Printf("Done in %s (load %s, indexes %s)\n", time.Since(start).Round(time.Second), loadTime.Round(time.Second), (time.Since(start) - loadTime).Round(time.Second))
 	summary(ctx, pool)
 }
@@ -265,6 +267,30 @@ func titleCase(s string) string {
 		return "Beauty"
 	}
 	return "Books"
+}
+
+// announceLoad tells Cuboid and the store app a bulk load is running, and ends
+// any replication session, so the load is not streamed row by row. When the
+// flag clears, Cuboid finds no slot and loads a snapshot of the new data.
+func announceLoad(ctx context.Context, pool *pgxpool.Pool, loading bool) error {
+	stmts := []string{
+		"CREATE TABLE IF NOT EXISTS seed_status (id int PRIMARY KEY DEFAULT 1 CHECK (id = 1), loading boolean NOT NULL DEFAULT false)",
+		"INSERT INTO seed_status DEFAULT VALUES ON CONFLICT DO NOTHING",
+		"GRANT SELECT ON seed_status TO cuboid_cdc, app",
+		fmt.Sprintf("UPDATE seed_status SET loading = %v", loading),
+	}
+	if loading {
+		stmts = append(stmts,
+			"SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name LIKE 'cuboid_%' AND active_pid IS NOT NULL",
+			"SELECT pg_sleep(0.5)",
+			"SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name LIKE 'cuboid_%' AND NOT active")
+	}
+	for _, s := range stmts {
+		if _, err := pool.Exec(ctx, s); err != nil {
+			return fmt.Errorf("%s: %w", s, err)
+		}
+	}
+	return nil
 }
 
 func prepare(ctx context.Context, pool *pgxpool.Pool) error {

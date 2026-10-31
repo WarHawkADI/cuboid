@@ -78,6 +78,11 @@ CREATE TABLE soc_alerts (
   PRIMARY KEY (tenant_id, alert_id)
 );
 
+-- A bulk data load sets this; Cuboid and the store app wait, and Cuboid then
+-- takes one consistent snapshot instead of streaming millions of rows.
+CREATE TABLE seed_status (id int PRIMARY KEY DEFAULT 1 CHECK (id = 1), loading boolean NOT NULL DEFAULT false);
+INSERT INTO seed_status DEFAULT VALUES;
+
 -- Retractions need the full old row on UPDATE and DELETE (ADR-003).
 ALTER TABLE orders     REPLICA IDENTITY FULL;
 ALTER TABLE soc_alerts REPLICA IDENTITY FULL;

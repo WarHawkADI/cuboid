@@ -47,6 +47,7 @@ type sim struct {
 	readsPS  atomic.Int64
 	writesPS atomic.Int64
 	paused   atomic.Bool
+	loading  atomic.Bool
 	surge    atomic.Pointer[surgeState]
 
 	mu      sync.Mutex
@@ -119,15 +120,29 @@ func main() {
 
 // loadTenantsLoop reads store sizes once there is data, and again after a reseed.
 func (s *sim) loadTenantsLoop(ctx context.Context) {
+	stale := true
 	for ctx.Err() == nil {
-		if err := s.loadTenants(ctx); err != nil {
-			s.log.Info("waiting for seeded data", "err", err)
-			time.Sleep(5 * time.Second)
+		var loading bool
+		if err := s.pool.QueryRow(ctx, "SELECT loading FROM seed_status").Scan(&loading); err == nil && loading {
+			if !s.loading.Swap(true) {
+				s.log.Info("a data load is running; the store app waits")
+			}
+			stale = true
+			time.Sleep(time.Second)
 			continue
+		}
+		if stale {
+			if err := s.loadTenants(ctx); err != nil {
+				s.log.Info("waiting for seeded data", "err", err)
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			stale = false
+			s.loading.Store(false)
 		}
 		select {
 		case <-ctx.Done():
-		case <-time.After(10 * time.Minute):
+		case <-time.After(time.Second):
 		}
 	}
 }
@@ -204,7 +219,7 @@ func (s *sim) run(ctx context.Context, writes bool) {
 		if writes {
 			rate = s.writesPS.Load()
 		}
-		if s.paused.Load() || rate <= 0 {
+		if s.paused.Load() || s.loading.Load() || rate <= 0 {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}

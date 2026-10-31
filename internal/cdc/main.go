@@ -111,6 +111,24 @@ func (e *Emitter) Heartbeats(ctx context.Context, interval time.Duration, onErr 
 	}
 }
 
+// Loading reports whether a bulk data load is running on the main database.
+func (e *Emitter) Loading(ctx context.Context) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.conn == nil || e.conn.IsClosed() {
+		c, err := ConnectPlain(ctx, e.dsn, "cuboid-emitter")
+		if err != nil {
+			return false
+		}
+		e.conn = c
+	}
+	var loading bool
+	if err := e.conn.QueryRow(ctx, "SELECT loading FROM seed_status").Scan(&loading); err != nil {
+		return false // no such table on a database Cuboid did not seed
+	}
+	return loading
+}
+
 // SlotHealth is what pg_replication_slots says about Cuboid's slot.
 type SlotHealth struct {
 	Exists       bool

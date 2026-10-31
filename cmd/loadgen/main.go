@@ -59,6 +59,7 @@ type gen struct {
 	stores  []store
 	samples []sample
 	errs    atomic.Int64
+	bad     map[string]int64 // failures by status and query, to say what failed
 	reqs    atomic.Int64
 	gen     atomic.Int64
 }
@@ -266,6 +267,12 @@ func (g *gen) viewer(ctx context.Context, mode string, s store, offset time.Dura
 			g.reqs.Add(1)
 			if err != nil {
 				g.errs.Add(1)
+				g.mu.Lock()
+				if g.bad == nil {
+					g.bad = map[string]int64{}
+				}
+				g.bad[err.Error()+" "+q]++
+				g.mu.Unlock()
 				continue
 			}
 			g.mu.Lock()
@@ -292,6 +299,10 @@ func (g *gen) state(w http.ResponseWriter, r *http.Request) {
 		per[s.q] = append(per[s.q], s.ms)
 	}
 	mode, viewers := g.mode, g.viewers
+	bad := make(map[string]int64, len(g.bad))
+	for k, v := range g.bad {
+		bad[k] = v
+	}
 	g.mu.Unlock()
 	p := monitor.Summarise("dashboard", all)
 	var perQ []monitor.Percentiles
@@ -301,7 +312,7 @@ func (g *gen) state(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(perQ, func(i, j int) bool { return perQ[i].Name < perQ[j].Name })
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"mode": mode, "viewers": viewers, "qps": float64(p.Count) / 5, "p50_ms": p.P50, "p95_ms": p.P95, "p99_ms": p.P99,
-		"requests": g.reqs.Load(), "errors": g.errs.Load(), "per_query": perQ})
+		"requests": g.reqs.Load(), "errors": g.errs.Load(), "failures": bad, "per_query": perQ})
 }
 
 func (g *gen) control(w http.ResponseWriter, r *http.Request) {
