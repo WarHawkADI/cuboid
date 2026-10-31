@@ -1,0 +1,12 @@
+# Bonus B-3 and abuse limits. Values left out use the defaults in internal/limiter.
+heavy_cost: 20000          # estimated cells + mirror rows above which a query is heavy
+heavy_per_tenant: 2        # concurrent heavy queries per store (or company)
+light_per_tenant: 32       # concurrent light queries per store
+global_concurrency: 16     # concurrent aggregate-store reads overall
+wait_ms: 200               # a query waits this long for a slot, then gets 429 with Retry-After
+key_rate_per_second: 50    # per API key
+key_burst: 100
+max_edge_rows: 400000      # a query may not read more raw mirror rows than this (422 instead)
+cache_entries: 512         # cached answers per store partition
+verify_per_minute: 120     # budget for checks against the main database
+sse_per_tenant: 50         # live connections per store

@@ -218,3 +218,81 @@ func quoteAll(xs []string) []string {
 }
 
 func quoteLiteral(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+
+// SwapIn replaces each live table with its shadow copy inside tx: the old
+// table is dropped and the shadow's indexes and constraints take the live
+// names. Readers see either the old tables or the new ones, never a mix.
+func SwapIn(ctx context.Context, tx pgx.Tx, live []string, suffix string) error {
+	for _, l := range live {
+		sh := l + suffix
+		stmts := []string{
+			fmt.Sprintf("ALTER TABLE %s RENAME TO %s", QuoteIdent(l), QuoteIdent(l+"__old")),
+			fmt.Sprintf("ALTER TABLE %s RENAME TO %s", QuoteIdent(sh), QuoteIdent(l)),
+			fmt.Sprintf("DROP TABLE %s", QuoteIdent(l+"__old")),
+		}
+		for _, s := range stmts {
+			if _, err := tx.Exec(ctx, s); err != nil {
+				return fmt.Errorf("swap %s: %w", l, err)
+			}
+		}
+		rows, err := tx.Query(ctx, `SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+			WHERE i.indrelid = $1::regclass`, l)
+		if err != nil {
+			return err
+		}
+		var idx []string
+		for rows.Next() {
+			var n string
+			if err := rows.Scan(&n); err != nil {
+				rows.Close()
+				return err
+			}
+			idx = append(idx, n)
+		}
+		rows.Close()
+		for _, n := range idx {
+			if nn := strings.Replace(n, sh, l, 1); nn != n {
+				if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER INDEX %s RENAME TO %s", QuoteIdent(n), QuoteIdent(nn))); err != nil {
+					return err
+				}
+			}
+		}
+		rows, err = tx.Query(ctx, `SELECT conname FROM pg_constraint WHERE conrelid = $1::regclass AND contype = 'c'`, l)
+		if err != nil {
+			return err
+		}
+		var cons []string
+		for rows.Next() {
+			var n string
+			if err := rows.Scan(&n); err != nil {
+				rows.Close()
+				return err
+			}
+			cons = append(cons, n)
+		}
+		rows.Close()
+		for _, n := range cons {
+			if nn := strings.Replace(n, sh, l, 1); nn != n {
+				if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s RENAME CONSTRAINT %s TO %s", QuoteIdent(l), QuoteIdent(n), QuoteIdent(nn))); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// DropShadows removes leftover shadow tables from an interrupted rebuild.
+func (s *Store) DropShadows(ctx context.Context, cfg *config.Config) error {
+	for _, name := range cfg.Sources.Keys() {
+		if _, err := s.W.Exec(ctx, "DROP TABLE IF EXISTS "+QuoteIdent(config.MirrorTable(name)+"_shadow")); err != nil {
+			return err
+		}
+	}
+	for _, src := range cfg.FactSources() {
+		if _, err := s.W.Exec(ctx, "DROP TABLE IF EXISTS "+QuoteIdent(config.CellTable(src.Name)+"_shadow")); err != nil {
+			return err
+		}
+	}
+	return nil
+}

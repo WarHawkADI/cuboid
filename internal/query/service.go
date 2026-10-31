@@ -438,3 +438,22 @@ func (st *Stats) Cost(pl *planner.Plan, tenants []int32, loc *time.Location) (ce
 	}
 	return cells, edgeRows
 }
+
+// EvalAt evaluates a plan in a fresh AGG snapshot and calls onSnapshot as
+// soon as that snapshot is taken (the fenced verifier then lets the next
+// flush proceed). It returns the raw result for exact comparison.
+func (s *Service) EvalAt(ctx context.Context, t Target, plan *planner.Plan, onSnapshot func()) (planner.Result, error) {
+	var res planner.Result
+	called := false
+	err := s.Store.ReadTx(ctx, t.Tenants, store.ReadOptions{}, func(tx pgx.Tx, _ store.Freshness) error {
+		onSnapshot()
+		called = true
+		r, err := s.read(ctx, tx, s.Active().Cfg, plan, t)
+		res = r
+		return err
+	})
+	if !called {
+		onSnapshot()
+	}
+	return res, err
+}

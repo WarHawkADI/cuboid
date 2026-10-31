@@ -1,0 +1,156 @@
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw cat: "apparel"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw city: "Pune"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw steps: 1
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw txnSize: 1
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw tenant: 1
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw op: 0
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw customer: 1
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw product: 1
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw qty: 1
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw amount: 0
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw status: "placed"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw pay: "upi"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw channel: "web"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw created: 0
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw flushNow: 0
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw scope: 0
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw qtenant: 1
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw preset: true
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw range: "today"
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw group: []string(nil)
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw filter: 0
+# 2026/10/31 13:14:13.136394 [TestModel] [rapid] draw interval: 0
+# 2026/10/31 13:14:13.136394 [TestModel] rebuild has 32 cells, incremental has 19
+# 
+v0.4.8#2268356764661503513
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

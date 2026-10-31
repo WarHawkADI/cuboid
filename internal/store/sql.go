@@ -13,16 +13,21 @@ import (
 )
 
 // Names maps logical tables to physical ones, so the same SQL builds live
-// tables or a rebuild's shadow copies.
+// tables or a rebuild's shadow copies. A rebuild from the mirror reads the
+// live mirror and writes shadow cells; a rebuild from main uses shadows of both.
 type Names struct {
-	Suffix string // "" or "_shadow"
+	MirrorSuffix string // "" or "_shadow"
+	CellSuffix   string // "" or "_shadow"
 }
 
+// Shadow names shadow copies of every table.
+var Shadow = Names{MirrorSuffix: "_shadow", CellSuffix: "_shadow"}
+
 // Cells is the cell table of a fact source.
-func (n Names) Cells(source string) string { return QuoteIdent(config.CellTable(source) + n.Suffix) }
+func (n Names) Cells(source string) string { return QuoteIdent(config.CellTable(source) + n.CellSuffix) }
 
 // Mirror is the mirror of a source table.
-func (n Names) Mirror(source string) string { return QuoteIdent(config.MirrorTable(source) + n.Suffix) }
+func (n Names) Mirror(source string) string { return QuoteIdent(config.MirrorTable(source) + n.MirrorSuffix) }
 
 // joins collects the LEFT JOINs a set of dimension expressions needs.
 type joins struct {

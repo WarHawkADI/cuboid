@@ -388,3 +388,27 @@ func (f *Flusher) writeCells(ctx context.Context, tx pgx.Tx, cfg *config.Config,
 	}
 	return nil
 }
+
+// WriteCells adds cell deltas to the flusher's cell tables inside tx (used to
+// replay an online rebuild's delta log into its shadow cells).
+func (f *Flusher) WriteCells(ctx context.Context, tx pgx.Tx, cfg *config.Config, cells map[engine.CellKey][]int64) error {
+	want := map[store.DimValue]bool{}
+	for k := range cells {
+		r := cfg.RollupByID(k.Rollup)
+		src := cfg.Sources.Get(r.Source)
+		for i, dim := range r.Dims {
+			if !src.Dimensions.Get(dim).IsKey() && k.K[i] != engine.Null {
+				want[store.DimValue{Dim: dim, Value: k.K[i]}] = true
+			}
+		}
+	}
+	ids, err := f.Dict.Resolve(ctx, tx, want)
+	if err != nil {
+		return err
+	}
+	if err := f.writeCells(ctx, tx, cfg, store.Encoder{Cfg: cfg, Dict: f.Dict}, ids, cells); err != nil {
+		return err
+	}
+	f.Dict.Remember(ids)
+	return nil
+}

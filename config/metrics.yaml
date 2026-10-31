@@ -39,6 +39,28 @@ sources:
   tenants:
     key: [tenant_id]
 
+  # Mitigata's own shape of data, on the same engine through config only (W9):
+  # a tenant is a client organisation; the same four queries, isolation and checks.
+  soc_alerts:
+    key: [tenant_id, alert_id]
+    time: created_at
+    count_measure: alerts
+    pii_columns: [analyst_note]
+    measures:
+      alerts:     {type: count}
+      risk_total: {type: sum, column: risk_score}
+    derived:
+      average_risk: {expr: "risk_total / alerts", round: half_up}
+    dimensions:
+      severity:       {column: severity}
+      status:         {column: status}
+      source_product: {column: source_product}
+      tactic:         {column: tactic}
+      asset_id:       {column: asset_id, type: key}
+    top:
+      assets:  {dim: asset_id}
+      tactics: {dim: tactic}
+
 rollups:
   totals:          {source: orders, dims: [],                    grains: {hour: all,  day: all,  month: all}}
   by_status:       {source: orders, dims: [status],              grains: {hour: all,  day: all,  month: all}}
@@ -47,3 +69,9 @@ rollups:
   top_product:     {source: orders, dims: [status, product_id],  grains: {hour: 35d,  day: all,  month: all}, key_dim: product_id}
   top_customer:    {source: orders, dims: [status, customer_id], grains: {day: 100d,  month: all}, key_dim: customer_id}
   top_city:        {source: orders, dims: [status, city],        grains: {day: all,   month: all}}
+
+  alert_totals:      {source: soc_alerts, dims: [],                    grains: {hour: all, day: all, month: all}}
+  alert_severity:    {source: soc_alerts, dims: [severity, status],    grains: {hour: 120d, day: all, month: all}}
+  alert_tactic:      {source: soc_alerts, dims: [tactic, severity],    grains: {hour: 35d, day: all, month: all}}
+  alert_source:      {source: soc_alerts, dims: [source_product, severity], grains: {day: all, month: all}}
+  alert_asset:       {source: soc_alerts, dims: [severity, asset_id],  grains: {day: all, month: all}, key_dim: asset_id}

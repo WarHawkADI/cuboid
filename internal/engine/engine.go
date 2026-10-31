@@ -445,7 +445,8 @@ func (e *Engine) contributeTo(rollups []*config.Rollup, f *Fact, sign int64, d *
 	d.touch(f.Tenant, f.Time)
 }
 
-// CellsFrom recomputes the cells of the given rollups from mirror rows. It is
+// CellsFrom recomputes the cells of the given rollups (all over the facts'
+// source) from mirror rows. It is
 // the in-memory form of a rebuild from the mirror and is what the SQL rebuild
 // must equal.
 func (e *Engine) CellsFrom(rollups []*config.Rollup, facts []*Fact) map[CellKey][]int64 {

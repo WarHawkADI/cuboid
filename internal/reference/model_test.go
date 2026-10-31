@@ -387,7 +387,7 @@ func TestModel(t *testing.T) {
 // checkRebuildEqualsIncremental: recomputing every cell from the mirror gives
 // exactly the incrementally maintained cells.
 func (w *world) checkRebuildEqualsIncremental(t *rapid.T) {
-	rebuilt := w.eng.CellsFrom(w.cfg.Rollups.Values(), w.facts())
+	rebuilt := w.eng.CellsFrom(w.cfg.RollupsFor("orders"), w.facts())
 	if len(rebuilt) != len(w.cells) {
 		t.Fatalf("rebuild has %d cells, incremental has %d", len(rebuilt), len(w.cells))
 	}
