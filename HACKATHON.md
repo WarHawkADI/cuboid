@@ -2,6 +2,8 @@
 
 # Mitigata CyberForge submission
 
+**Team iiitdards:** Aditya Rai, Bhuvan Raju
+
 **Problem 02: fast multi-tenant data aggregation.** Live dashboards for 100 stores over 10 million orders, without overloading the database that takes those orders, and without one store ever seeing another's numbers.
 
 | | |

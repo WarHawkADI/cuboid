@@ -47,7 +47,7 @@ One button drives this through the real APIs, at 10M orders. The [full recording
 | **New metrics are config** | One line of YAML build a new breakdown from the mirror, live in about a minute at 10M, with no restart and no load on the main database |
 | **Honest about its limits** | One query misses its targets, and [the scorecard](#the-targets-scorecard) says so. [The final report](docs/FINAL_REPORT.md) lists what was left out |
 
-Built for Mitigata CyberForge, Problem 02. The submission summary is in [HACKATHON.md](HACKATHON.md).
+Built for Mitigata CyberForge, Problem 02, by team iiitdards: Aditya Rai and Bhuvan Raju. The submission summary is in [HACKATHON.md](HACKATHON.md).
 
 ## Quick start
 
