@@ -117,7 +117,7 @@ export function Monitor() {
   const busiest = state?.limiter[0];
 
   return (
-    <main className="page">
+    <main className="page" style={pilot ? { paddingBottom: 170 } : undefined}>
       {error && <p className="alarm">{error}</p>}
       {state?.alarms.map((a) => (
         <p className="alarm" key={a.name}>
@@ -176,7 +176,7 @@ export function Monitor() {
                         <td>{r.good}</td>
                         <td>{r.great}</td>
                         <td>{r.measured}</td>
-                        <td className={r.verdict === "Great" ? "great" : r.verdict === "Good" ? "good" : "bad"}>{r.verdict}</td>
+                        <td className={r.verdict === "Great" ? "great" : r.verdict === "Good" ? "good" : r.verdict === "Not measured" ? "label" : "bad"}>{r.verdict}</td>
                       </tr>
                     ))}
                   </tbody>

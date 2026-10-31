@@ -35,7 +35,7 @@ function Rail({ keys }: { keys: DemoKey[] }) {
         <NavLink to="/monitor">Monitoring</NavLink>
         <NavLink to="/t/42">Store</NavLink>
         <NavLink to="/isolation">Isolation</NavLink>
-        <NavLink to="/bench">Benchmarks</NavLink>
+        <NavLink to="/bench">Results</NavLink>
       </nav>
       {keys.length > 0 && (
         <label className="push label">

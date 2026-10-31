@@ -213,7 +213,7 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
         </div>
         {!apiKey && <p className="empty">Waiting for demo keys. Cuboid may still be loading its first snapshot.</p>}
         {error && <p className="alarm">{error}</p>}
-        {fresh && <p className={fresh.stale ? "stale" : "label"}>{fresh.updated[0].toUpperCase() + fresh.updated.slice(1)}</p>}
+        {fresh && <p className={fresh.lag_ms > 30000 ? "stale" : "label"}>{fresh.updated[0].toUpperCase() + fresh.updated.slice(1)}</p>}
         {apiKey && !s && !loaded && <p className="empty">Loading the numbers…</p>}
         {s && data.summary && (
           <>

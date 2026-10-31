@@ -164,6 +164,10 @@ func (s *Service) topTotal(ctx context.Context, tx pgx.Tx, act *Active, t Target
 	return nil
 }
 
+// noFaults marks a read the leak drill must not touch: a check against the main
+// database has to compare real answers even while a drill runs.
+type noFaults struct{}
+
 // errWrongShape means a store result does not have this query's columns: the
 // result of another query was delivered to this one.
 var errWrongShape = errors.New("the store result does not have this query's shape")
@@ -417,7 +421,7 @@ func (s *Service) read(ctx context.Context, tx pgx.Tx, cfg *config.Config, plan 
 	}
 	// Drill B: a pooled client that, after a cancellation, hands this request
 	// the previous request's rows. This is the INC-02 mechanism.
-	if s.Drill.Mode() == DrillConnectionMixup {
+	if s.Drill.Mode() == DrillConnectionMixup && ctx.Value(noFaults{}) == nil {
 		if prev, ok := s.Drill.swap(raws); ok && rand.IntN(3) == 0 {
 			raws = prev.([]raw)
 			s.Drill.injected()
@@ -663,6 +667,7 @@ func checkTop(src *config.Source, req *Request, full, top planner.Result, limit 
 // flush proceed). It returns the raw result for exact comparison, and checks
 // the request's pushed-down form, if it has one, against it.
 func (s *Service) EvalAt(ctx context.Context, t Target, req *Request, plan *planner.Plan, onSnapshot func()) (planner.Result, error) {
+	ctx = context.WithValue(ctx, noFaults{}, true)
 	var res planner.Result
 	called := false
 	err := s.Store.ReadTx(ctx, t.Tenants, store.ReadOptions{}, func(tx pgx.Tx, _ store.Freshness) error {

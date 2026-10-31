@@ -21,7 +21,7 @@ let metricBuild: Promise<{ ok: boolean; took_ms: number; error?: string }> | nul
 const beats: Beat[] = [
   {
     title: "The problem",
-    say: "One big store's report makes the app slow for all stores: the PRD's words. Watch the recorder climb past the target lines.",
+    say: "One big store's report makes the app slow for all stores: the PRD's words. Watch the recorder climb.",
     run: async () => {
       await admin("/admin/path", { mode: "direct", viewers: 1000 });
       return "1,000 dashboards are querying the main database directly.";
@@ -29,7 +29,7 @@ const beats: Beat[] = [
   },
   {
     title: "Flip to Cuboid",
-    say: "Same load, same database. Dashboard queries on the main database drop to zero and the app returns under the line.",
+    say: "Same load, same database. Dashboard queries on the main database drop to zero, and the app's query time falls.",
     run: async () => {
       await admin("/admin/path", { mode: "cuboid", viewers: 1000 });
       return "1,000 dashboards now read from Cuboid.";

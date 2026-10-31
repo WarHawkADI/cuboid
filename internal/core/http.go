@@ -32,6 +32,7 @@ func (c *Core) Routes() http.Handler {
 	mux.HandleFunc("GET /api/monitor/state", c.monitorState)
 	mux.HandleFunc("GET /api/scorecard", c.scorecard)
 	mux.HandleFunc("GET /api/bench", c.bench)
+	mux.HandleFunc("GET /api/results", c.results)
 	mux.HandleFunc("GET /api/demo/keys", c.demoKeys)
 	mux.HandleFunc("POST /admin/rebuild", c.operator(c.adminRebuild))
 	mux.HandleFunc("POST /admin/config/reload", c.operator(func(w http.ResponseWriter, r *http.Request) {
@@ -380,6 +381,20 @@ func (c *Core) scorecard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Artifact", name)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(b)
+}
+
+// results returns the measured artifacts for the results page, as written.
+func (c *Core) results(w http.ResponseWriter, r *http.Request) {
+	out := map[string]json.RawMessage{}
+	for key, path := range map[string]string{
+		"speed_main": "speed/main", "speed_small": "speed/small", "growth": "growth/latest", "freshness": "freshness/main",
+		"correctness": "correctness/main", "redteam": "redteam/main", "isolation": "isolation/dev", "chaos": "chaos/dev", "demo_check": "demo-check/dev",
+	} {
+		if b, err := os.ReadFile(filepath.Join(c.Opt.ArtifactsDir, filepath.FromSlash(path)+".json")); err == nil && json.Valid(b) {
+			out[key] = b
+		}
+	}
+	writeJSON(w, 200, out)
 }
 
 func (c *Core) bench(w http.ResponseWriter, r *http.Request) {

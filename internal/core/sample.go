@@ -9,6 +9,11 @@ import (
 	"cuboid/internal/monitor"
 )
 
+type loadState struct {
+	mode    string
+	viewers int
+}
+
 var sampleClient = &http.Client{Timeout: 700 * time.Millisecond}
 
 func getJSON(ctx context.Context, url string, v any) bool {
@@ -50,6 +55,9 @@ func (c *Core) sample(ctx context.Context) monitor.Point {
 		if lg.Mode == "cuboid" {
 			p.CuboidQPS = lg.QPS
 		}
+		c.lastMode.Store(&loadState{mode: lg.Mode, viewers: lg.Viewers})
+	} else if s := c.lastMode.Load(); s != nil {
+		p.Mode, p.Viewers = s.mode, s.viewers // busy, not gone: keep the bands and baseline honest
 	}
 	var nv struct {
 		QPS float64 `json:"qps"`

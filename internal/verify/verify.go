@@ -107,7 +107,9 @@ func (v *Verifier) HTTP(ctx context.Context, t query.Target, req *query.Request)
 	return res, nil
 }
 
-var errRingGap = errors.New("a transaction needed for reconciliation has left the buffer")
+// errRingGap means this attempt cannot reconcile: a needed transaction left the
+// buffer, or a rebuild holds the flusher. Trying again is safe.
+var errRingGap = errors.New("Cuboid could not take a clean check at this moment; a rebuild may be running")
 
 // Check runs a fenced verification, retrying if the transaction buffer no
 // longer covers the reconciliation window.
@@ -122,6 +124,7 @@ func (v *Verifier) Check(ctx context.Context, t query.Target, req *query.Request
 		if !errors.Is(err, errRingGap) {
 			break
 		}
+		time.Sleep(time.Second)
 	}
 	if err != nil {
 		return nil, err
@@ -173,6 +176,10 @@ func (v *Verifier) fenced(ctx context.Context, t query.Target, req *query.Reques
 	go func() {
 		select {
 		case fr := <-reached:
+			if fr.Busy {
+				aggc <- agg{err: errRingGap}
+				return
+			}
 			start := time.Now()
 			r, err := v.Svc.EvalAt(ctx, t, req, plan, func() { close(fr.Release) })
 			aggc <- agg{res: r, ms: msSince(start), err: err}

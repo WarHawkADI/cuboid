@@ -27,6 +27,7 @@ import (
 type FenceReached struct {
 	LSN     pglogrepl.LSN
 	Release chan struct{}
+	Busy    bool // a rebuild holds the flusher: no flush boundary is possible now
 }
 
 // Pipeline is the stream handler.
@@ -234,6 +235,13 @@ func (p *Pipeline) Message(ctx context.Context, prefix, content string, lsn pglo
 		delete(p.fences, content)
 		p.mu.Unlock()
 		if ch == nil {
+			return nil
+		}
+		// While paused for a rebuild, nothing may flush: the rebuild took its
+		// snapshot at the last flush and logs only later ones, so a flush here
+		// would be in neither. The check is asked to try again.
+		if p.paused {
+			ch <- FenceReached{LSN: lsn, Busy: true}
 			return nil
 		}
 		// Force a flush boundary exactly at the fence: AGG now holds every

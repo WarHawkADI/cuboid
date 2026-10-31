@@ -91,6 +91,7 @@ type Core struct {
 	StartedAt  time.Time
 
 	lastAutoRebuild atomic.Int64
+	lastMode        atomic.Pointer[loadState]
 	lastReload      atomic.Pointer[ReloadReport]
 	lastDrill       atomic.Pointer[DrillReport]
 	lastFlood       atomic.Pointer[FloodReport]
