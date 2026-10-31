@@ -1,0 +1,109 @@
+# Cuboid: everything a judge needs, with only Docker.
+#   docker compose up -d --build                         start the stack
+#   docker compose --profile seed run --rm seed          load the small tier (1M orders, 10 stores)
+#   open http://localhost:8080/monitor
+# Passwords below are documented development defaults for a local, offline stack.
+
+x-app: &app
+  image: cuboid:local
+  build: .
+  restart: unless-stopped
+  depends_on:
+    maindb: {condition: service_healthy}
+    aggdb: {condition: service_healthy}
+
+services:
+  maindb:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shop
+    command: >
+      postgres
+      -c wal_level=logical -c max_replication_slots=10 -c max_wal_senders=10 -c max_slot_wal_keep_size=4GB
+      -c shared_preload_libraries=pg_stat_statements -c track_io_timing=on -c timezone=Asia/Kolkata
+      -c shared_buffers=1GB -c effective_cache_size=3GB -c work_mem=32MB -c maintenance_work_mem=512MB
+      -c max_connections=300 -c logical_decoding_work_mem=256MB -c max_wal_size=4GB
+    volumes:
+      - ./migrations/main:/docker-entrypoint-initdb.d:ro
+      - maindata:/var/lib/postgresql/data
+    ports: ["5433:5432"]
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shop"]
+      interval: 2s
+      retries: 60
+
+  aggdb:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agg
+    command: >
+      postgres
+      -c timezone=Asia/Kolkata -c shared_buffers=1GB -c effective_cache_size=3GB -c work_mem=64MB
+      -c maintenance_work_mem=1GB -c max_connections=200 -c max_wal_size=4GB -c max_parallel_workers_per_gather=2
+    volumes:
+      - ./migrations/agg:/docker-entrypoint-initdb.d:ro
+      - aggdata:/var/lib/postgresql/data
+    ports: ["5434:5432"]
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agg"]
+      interval: 2s
+      retries: 60
+
+  cuboid:
+    <<: *app
+    command: ["supervisor", "--", "cuboid", "serve"]
+    environment:
+      CUBOID_MAIN_CDC_DSN: postgres://cuboid_cdc:cuboid_cdc@maindb:5432/shop
+      CUBOID_MAIN_VERIFY_DSN: postgres://cuboid_verify:cuboid_verify@maindb:5432/shop
+      CUBOID_AGG_WRITER_DSN: postgres://cuboid_writer:cuboid_writer@aggdb:5432/agg
+      CUBOID_AGG_READER_DSN: postgres://cuboid_reader:cuboid_reader@aggdb:5432/agg
+      CUBOID_KEY_PEPPER: ${CUBOID_KEY_PEPPER:-dev-pepper-change-me}
+      CUBOID_DEMO_MODE: ${CUBOID_DEMO_MODE:-true}
+      CUBOID_DEMO_KEY_SEED: ${CUBOID_DEMO_KEY_SEED:-cuboid-demo}
+      CUBOID_FLUSH_INTERVAL: 1s
+      CUBOID_STOREAPP_URL: http://storesim:8081
+      CUBOID_LOADGEN_URL: http://loadgen:8082
+      CUBOID_NAIVE_URL: http://naive:8083
+    volumes:
+      - ./config:/app/config          # edit config/metrics.yaml live (bonus B-4)
+      - ./artifacts:/app/artifacts    # the targets scorecard and benchmark results
+    ports: ["8080:8080"]
+
+  storesim:
+    <<: *app
+    command: ["storesim"]
+    environment:
+      STORESIM_MAIN_DSN: postgres://app:app@maindb:5432/shop
+    ports: ["8081:8081"]
+
+  naive:
+    <<: *app
+    command: ["naive"]
+    environment:
+      NAIVE_MAIN_DSN: postgres://naive_dash:naive_dash@maindb:5432/shop
+      NAIVE_METRICS: /app/config/metrics.yaml
+    ports: ["8083:8083"]
+
+  loadgen:
+    <<: *app
+    command: ["loadgen"]
+    environment:
+      LOADGEN_CUBOID_URL: http://cuboid:8080
+      LOADGEN_NAIVE_URL: http://naive:8083
+    ports: ["8082:8082"]
+
+  seed:
+    <<: *app
+    profiles: ["seed"]
+    restart: "no"
+    command: ["seed", "--tier", "${SEED_TIER:-small}"]
+    environment:
+      SEED_MAIN_DSN: postgres://postgres:postgres@maindb:5432/shop
+
+volumes:
+  maindata:
+  aggdata:

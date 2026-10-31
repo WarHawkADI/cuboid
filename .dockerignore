@@ -1,0 +1,8 @@
+web/node_modules
+web/dist
+artifacts
+bin
+*.pdf
+provided
+.git
+*.exe

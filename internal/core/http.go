@@ -49,6 +49,9 @@ func (c *Core) Routes() http.Handler {
 	mux.HandleFunc("POST /admin/scenario", c.operator(c.adminScenario))
 	mux.HandleFunc("POST /admin/verify-batch", c.operator(c.adminVerifyBatch))
 	mux.HandleFunc("POST /admin/chaos", c.operator(c.adminChaos))
+	mux.HandleFunc("POST /admin/demo/metric", c.operator(c.adminDemoMetric))
+	mux.HandleFunc("POST /admin/app/tenants/{id}/orders", c.operator(c.adminAppOrder))
+	mux.HandleFunc("POST /admin/app/tenants/{id}/orders/{order}/{action}", c.operator(c.adminAppOrderAction))
 	mux.HandleFunc("POST /admin/annotate", c.operator(func(w http.ResponseWriter, r *http.Request) {
 		var b struct{ Text string }
 		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&b)
@@ -227,13 +230,17 @@ func scenarioNote(name string) string {
 }
 
 func (c *Core) forward(w http.ResponseWriter, url string, body []byte) {
+	c.forwardMethod(w, "POST", url, body)
+}
+
+func (c *Core) forwardMethod(w http.ResponseWriter, method, url string, body []byte) {
 	if url == "" || strings.HasPrefix(url, "/") {
 		query.WriteProblem(w, &query.Problem{Status: 503, Type: "unavailable", Title: "Not connected", Detail: "This control needs the companion service, which is not configured."})
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
