@@ -1,0 +1,49 @@
+# Cuboid metrics configuration: what is aggregated, and how.
+# Edit this file while Cuboid runs: new rollups are built from the mirror
+# and become queryable without a restart (bonus B-4).
+
+timezone: from_main_db            # read SHOW TimeZone on the main database at startup
+
+tenancy:
+  tenant_column: tenant_id         # every published table carries the store id
+  company: {table: tenants, key: tenant_id, column: company_id, name_column: name}
+
+sources:
+  orders:
+    key: [tenant_id, order_id]
+    time: created_at
+    count_measure: orders
+    measures:                      # exact and retractable
+      orders: {type: count}
+      sales:  {type: sum, column: amount_paise, scale: 2, minor_units: true, unit: INR}
+      units:  {type: sum, column: quantity}
+    derived:
+      average_order_value: {expr: "sales / orders", round: half_up}
+    dimensions:
+      status:         {column: status}
+      payment_method: {column: payment_method}
+      channel:        {column: channel}
+      product_id:     {column: product_id, type: key, label: {table: products, column: name}}
+      customer_id:    {column: customer_id, type: key}
+      category:       {join: {table: products, on: product_id, column: category}}
+      city:           {join: {table: customers, on: customer_id, column: city}}
+    top:                           # GET /tenants/{id}/<entity>/top
+      products:  {dim: product_id}
+      customers: {dim: customer_id}
+      cities:    {dim: city}
+  products:
+    key: [tenant_id, product_id]
+  customers:
+    key: [tenant_id, customer_id]
+    pii_columns: [full_name, email, phone]   # never copied into the aggregate store
+  tenants:
+    key: [tenant_id]
+
+rollups:
+  totals:          {source: orders, dims: [],                    grains: {hour: all,  day: all,  month: all}}
+  by_status:       {source: orders, dims: [status],              grains: {hour: all,  day: all,  month: all}}
+  status_category: {source: orders, dims: [status, category],    grains: {hour: 120d, day: all,  month: all}}
+  status_channel:  {source: orders, dims: [status, channel],     grains: {hour: 120d, day: all,  month: all}}
+  top_product:     {source: orders, dims: [status, product_id],  grains: {hour: 35d,  day: all,  month: all}, key_dim: product_id}
+  top_customer:    {source: orders, dims: [status, customer_id], grains: {day: 100d,  month: all}, key_dim: customer_id}
+  top_city:        {source: orders, dims: [status, city],        grains: {day: all,   month: all}}

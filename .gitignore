@@ -1,0 +1,16 @@
+# confidential handouts and organisers' material stay out of the repository
+*.pdf
+provided/*
+!provided/README.md
+.env
+artifacts/*
+!artifacts/targets/
+!artifacts/screenshots/
+artifacts/targets/*.tmp
+web/node_modules/
+web/dist/
+bin/
+*.exe
+*.test
+*.out
+data/
