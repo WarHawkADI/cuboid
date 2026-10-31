@@ -140,6 +140,30 @@ func (s *Service) refresh(t Target, req *Request, plan *planner.Plan, key string
 	})
 }
 
+// topTotal fills in a top-N's total for shares, from the smallest rollup that
+// covers the query without its key, in the same snapshot as the list.
+func (s *Service) topTotal(ctx context.Context, tx pgx.Tx, act *Active, t Target, plan *planner.Plan, top *topLimit) error {
+	if top == nil {
+		return nil
+	}
+	q := *plan.Query
+	q.GroupBy = nil
+	pl, err := act.Planner.Plan(&q)
+	if err != nil {
+		return err
+	}
+	res, err := s.read(ctx, tx, act.Cfg, pl, t, nil)
+	if err != nil {
+		return err
+	}
+	mi := plan.Source.MeasureIndex(top.measure)
+	top.total = 0
+	for _, v := range res {
+		top.total += v[mi]
+	}
+	return nil
+}
+
 // errWrongShape means a store result does not have this query's columns: the
 // result of another query was delivered to this one.
 var errWrongShape = errors.New("the store result does not have this query's shape")
@@ -317,6 +341,9 @@ func (s *Service) compute(ctx context.Context, t Target, req *Request, plan *pla
 		if err != nil {
 			return err
 		}
+		if err := s.topTotal(ctx, tx, act, t, plan, top); err != nil {
+			return err
+		}
 		storeMS := ms(time.Since(storeStart))
 		data, err := s.shape(ctx, tx, act.Cfg, req, plan, res, t, top)
 		if err != nil {
@@ -343,7 +370,11 @@ func (s *Service) read(ctx context.Context, tx pgx.Tx, cfg *config.Config, plan 
 		return res, nil
 	}
 	enc := store.Encoder{Cfg: cfg, Dict: s.Dict}
-	sql, args, ok, err := store.QuerySQL(plan, enc, s.Loc, store.Names{})
+	only := ""
+	if top != nil {
+		only = top.measure
+	}
+	sql, args, ok, err := store.QuerySQL(plan, enc, s.Loc, store.Names{}, only)
 	if err != nil {
 		return nil, err
 	}
@@ -373,9 +404,6 @@ func (s *Service) read(ctx context.Context, tx pgx.Tx, cfg *config.Config, plan 
 		}
 		for i := range r.vals {
 			dest = append(dest, &r.vals[i])
-		}
-		if top != nil {
-			dest = append(dest, &top.total)
 		}
 		if err := rows.Scan(dest...); err != nil {
 			rows.Close()
@@ -622,7 +650,7 @@ func checkTop(src *config.Source, req *Request, full, top planner.Result, limit 
 			return fmt.Errorf("top %d: %v should be %d", limit.n, r.k, r.v)
 		}
 	}
-	if len(all) > 0 && limit.total != total {
+	if limit.total != total {
 		return fmt.Errorf("top %d: total %d from the store, %d expected", limit.n, limit.total, total)
 	}
 	return nil
@@ -646,6 +674,9 @@ func (s *Service) EvalAt(ctx context.Context, t Target, req *Request, plan *plan
 		if limit := pushdown(req, plan); limit != nil {
 			top, err := s.read(ctx, tx, s.Active().Cfg, plan, t, limit)
 			if err != nil {
+				return err
+			}
+			if err := s.topTotal(ctx, tx, s.Active(), t, plan, limit); err != nil {
 				return err
 			}
 			return checkTop(plan.Source, req, r, top, limit)

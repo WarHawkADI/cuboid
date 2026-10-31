@@ -207,7 +207,10 @@ func (e Encoder) KeyID(src *config.Source, dim, value string) (int64, bool, erro
 // It returns ok=false when a filter value does not exist (no row can match).
 // Output columns: tenant_id, bucket (Unix seconds, 0 without interval),
 // one key id per GroupBy dimension, then each measure.
-func QuerySQL(pl *planner.Plan, enc Encoder, loc *time.Location, n Names) (sql string, args []any, ok bool, err error) {
+//
+// only, if set, sums that measure alone and returns 0 for the others: summing
+// three measures over 100,000 groups costs twice as much as ranking by one.
+func QuerySQL(pl *planner.Plan, enc Encoder, loc *time.Location, n Names, only string) (sql string, args []any, ok bool, err error) {
 	q, src, r := pl.Query, pl.Source, pl.Rollup
 	cfg := enc.Cfg
 	tz := quoteLiteral(loc.String())
@@ -220,6 +223,10 @@ func QuerySQL(pl *planner.Plan, enc Encoder, loc *time.Location, n Names) (sql s
 	for _, m := range src.Measures.Values() {
 		mcols = append(mcols, QuoteIdent(m.Name))
 		mrow = append(mrow, measureRowExpr(m))
+		if only != "" && m.Name != only {
+			msum = append(msum, "0::bigint AS "+QuoteIdent(m.Name))
+			continue
+		}
 		msum = append(msum, fmt.Sprintf("sum(%s)::bigint AS %s", QuoteIdent(m.Name), QuoteIdent(m.Name)))
 	}
 	filterIDs := map[string]int64{}
@@ -289,15 +296,13 @@ func QuerySQL(pl *planner.Plan, enc Encoder, loc *time.Location, n Names) (sql s
 // TopSQL narrows a QuerySQL statement to the n largest groups by a measure,
 // ordered value DESC, then store and key ASC, the API's top-N order. Only the
 // database sees every group, so a store's busiest list costs one sort rather
-// than sending every customer to the application. The last column is the total
-// of the measure over all groups, for shares. Key dimensions only: ids sort as
-// their labels do, and a dictionary id does not sort as its text.
+// than sending every customer to the application. Key dimensions only: ids sort
+// as their labels do, and a dictionary id does not sort as its text.
 func TopSQL(sql string, nKeys int, measure string, n int) string {
 	m := QuoteIdent(measure)
 	order := []string{m + " DESC", "tenant_id"}
 	for i := 0; i < nKeys; i++ {
 		order = append(order, "key"+strconv.Itoa(i))
 	}
-	return fmt.Sprintf("SELECT *, sum(%s) OVER ()::bigint AS total_measure FROM (%s) g WHERE %s <> 0 ORDER BY %s LIMIT %d",
-		m, sql, m, strings.Join(order, ", "), n)
+	return fmt.Sprintf("SELECT * FROM (%s) g WHERE %s <> 0 ORDER BY %s LIMIT %d", sql, m, strings.Join(order, ", "), n)
 }
