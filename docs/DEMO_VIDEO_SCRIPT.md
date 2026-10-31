@@ -10,6 +10,6 @@ About 2.5 minutes. Record `/monitor` at 1280x720 on the main tier. Numbers are f
 | 1:00 | Insert, then cancel an order | "A new order shows up in about a second. Cancel it, and it moves." |
 | 1:15 | Open a number, press Check against main database | "Any number. Compared at an exact point in the WAL, while writes run. Across 2,500 checks, every one was exact." |
 | 1:35 | Isolation page, run a drill | "INC-02 was a cache handing users other users' data. We inject that bug into our own code. Zero leaked." |
-| 2:00 | Flood, then YAML | "The biggest store floods and gets limited. Others do not notice. A new breakdown from three lines of YAML." |
+| 2:00 | Flood, then YAML | "The biggest store floods and gets limited. Others do not notice. A new breakdown from one line of YAML." |
 | 2:20 | Results page | "This is what we measured, including what we did not hit: one query misses the growth target, and we show it." |
 | 2:30 | End | "Fast for every store. Exact to the paisa. Never in the wrong store's hands." |

@@ -24,3 +24,4 @@ bin/
 *.out
 data/
 web/test-results/
+!docs/Cuboid_Final_Deck.pdf

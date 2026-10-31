@@ -28,7 +28,7 @@ Measured on one laptop on 31 October 2026. Every service shares its 12 logical C
 See `README.md`. On this machine: `tools/devdb.sh up`, `tools/stack.sh up`, then open <http://localhost:8080/monitor>.
 
 ## The demo
-`docs/DEMO_RUNBOOK.md`. Deck: the team's private Cuboid pitch deck (outline in `docs/DECK_OUTLINE.md`). Recording: `artifacts/demo_walkthrough.webm`, not in git because of its size.
+`docs/DEMO_RUNBOOK.md`. Deck: [`docs/Cuboid_Final_Deck.pptx`](Cuboid_Final_Deck.pptx), with speaker notes, and a [PDF copy](Cuboid_Final_Deck.pdf). Recording: [`docs/media/demo_walkthrough.webm`](media/demo_walkthrough.webm). Autopilot ran all 9 beats with no failures at 10M, three times in a row on the final build: 3:30, 2:39 and 2:25.
 
 ## What is simulated
 The data, the store app's traffic and the dashboards' traffic. Replication, rollups, checks against the main database and the drills' injected faults are real. SOC alerts are synthetic.
@@ -38,7 +38,7 @@ The data, the store app's traffic and the dashboards' traffic. Replication, roll
 2. **The organisers' script has not arrived.** When it does, follow `provided/README.md` and re-measure. If it targets MongoDB, no adapter exists.
 3. **Top customers** misses T1's Great line and T5. The specification's fix, running totals for preset windows, was not built: it touches the exactly-once flush path, and late changes there risk the correctness that is the project's strongest claim.
 4. **Moving ranges lag under load.** Under heavy dashboard load a preset such as `last_7d` refreshes about every 5 seconds, and at most every second otherwise. Answers are served with their true age and stay exact as of that age. Fixed ranges are not throttled.
-5. **Mixed builds.** The 1M figures behind the growth ratios come from an earlier build. Correctness and freshness were measured before the final refresh fix, which did not change how answers are computed. D1 to D17 ran on the final build.
+5. **Mixed builds.** The 1M figures behind the growth ratios come from an earlier build. Correctness, freshness, the 1,000,000-request run and the 20 kills were measured before the final refresh fix, which changed when answers are refreshed, not how they are computed. D1 to D17 ran after that fix, before the reload fix.
 6. **Memory.** The laptop ran out once and took down the main database and the store app. Cuboid recovered with no data difference. The trigger was never found. Close other applications before presenting.
 
 ## Left out of the specification
@@ -55,5 +55,5 @@ The data, the store app's traffic and the dashboards' traffic. Replication, roll
 
 ## What to do next
 1. Repair Docker and run `make docker-clean-clone-check`.
-2. Close other applications, then rehearse once while talking.
+2. Close other applications, then rehearse once while talking: Autopilot has been rehearsed, the talk has not.
 3. Learn the code well enough to answer questions: this is a hiring hackathon, and `docs/PITCH_QA.md` is a starting point.

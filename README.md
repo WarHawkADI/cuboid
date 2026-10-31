@@ -8,6 +8,7 @@
   <a href="docs/media/demo_walkthrough.webm"><b>Watch the demo</b></a> ·
   <a href="#the-targets-scorecard"><b>Scorecard</b></a> ·
   <a href="#how-it-works"><b>How it works</b></a> ·
+  <a href="docs/Cuboid_Final_Deck.pptx"><b>Deck</b></a> ·
   <a href="docs/PITCH_QA.md"><b>Hard questions</b></a>
 </p>
 
@@ -43,7 +44,7 @@ One button drives this through the real APIs, at 10M orders. The [full recording
 | **Exact, not approximate** | Updates and deletes retract the old row and add the new one. Rollups, mirror and replication position commit in one transaction, so a crash resumes exactly. 2,500 of 2,500 checks matched |
 | **Every number is provable** | Press "Check against main database" on any figure. It compares at an exact WAL position, while writes run. This check found a real bug that unit tests could not |
 | **Tested by breaking it** | Three drills inject INC-02's failure modes into Cuboid's own code: 0 leaked. 1,000,000 randomized requests with cancellations: 0 crossed stores. 20 `kill -9`s under writes: 500 of 500 checks exact |
-| **New metrics are config** | Three lines of YAML build a new breakdown from the mirror, live in about a minute at 10M, with no restart and no load on the main database |
+| **New metrics are config** | One line of YAML build a new breakdown from the mirror, live in about a minute at 10M, with no restart and no load on the main database |
 | **Honest about its limits** | One query misses its targets, and [the scorecard](#the-targets-scorecard) says so. [The final report](docs/FINAL_REPORT.md) lists what was left out |
 
 Built for Mitigata CyberForge, Problem 02. The submission summary is in [HACKATHON.md](HACKATHON.md).
@@ -263,7 +264,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  Y[Three lines in config/metrics.yaml] --> V{Valid?}
+  Y[One line in config/metrics.yaml] --> V{Valid?}
   V -->|No| E[Keep running, name the bad line]
   V -->|Yes| B[Build a shadow from the mirror]
   B --> S[Switch at a flush boundary]
@@ -319,7 +320,7 @@ On Windows without `make`, use `go run ./tools/task <target>`.
 
 | | |
 |---|---|
-| **Submission** | [HACKATHON.md](HACKATHON.md), [docs/FINAL_REPORT.md](docs/FINAL_REPORT.md), [docs/DEMO_RUNBOOK.md](docs/DEMO_RUNBOOK.md), [docs/DECK_OUTLINE.md](docs/DECK_OUTLINE.md), [docs/DEMO_VIDEO_SCRIPT.md](docs/DEMO_VIDEO_SCRIPT.md), [docs/PITCH_QA.md](docs/PITCH_QA.md), [docs/JUDGE_FAQ.md](docs/JUDGE_FAQ.md) |
+| **Submission** | [HACKATHON.md](HACKATHON.md), [the deck](docs/Cuboid_Final_Deck.pptx), [docs/FINAL_REPORT.md](docs/FINAL_REPORT.md), [docs/DEMO_RUNBOOK.md](docs/DEMO_RUNBOOK.md), [docs/DECK_OUTLINE.md](docs/DECK_OUTLINE.md), [docs/DEMO_VIDEO_SCRIPT.md](docs/DEMO_VIDEO_SCRIPT.md), [docs/PITCH_QA.md](docs/PITCH_QA.md), [docs/JUDGE_FAQ.md](docs/JUDGE_FAQ.md) |
 | **Results** | [docs/TARGETS.md](docs/TARGETS.md), [docs/BENCHMARKS.md](docs/BENCHMARKS.md), [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md), [artifacts/](artifacts/) |
 | **Design** | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/adr/](docs/adr/), [docs/POSTGRES_NOTES.md](docs/POSTGRES_NOTES.md), [docs/DATA.md](docs/DATA.md), [docs/DESIGN.md](docs/DESIGN.md) |
 | **Security** | [docs/ISOLATION.md](docs/ISOLATION.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/DISCLOSURE.md](docs/DISCLOSURE.md) |

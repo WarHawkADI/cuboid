@@ -120,7 +120,7 @@ const beats: Beat[] = [
   },
   {
     title: "The bonuses",
-    say: "The biggest store floods heavy queries and nobody else notices. A new breakdown from three lines of YAML, built from the mirror.",
+    say: "The biggest store floods heavy queries and nobody else notices. A new breakdown from one line of YAML, built from the mirror.",
     run: async () => {
       const f = await admin<{ heavy_limited: number; light_limited: number; others_p99_before_ms: number; others_p99_during_ms: number }>("/admin/flood", { store: STORE, seconds: 5 });
       await admin("/admin/demo/metric", { add: false });
@@ -131,7 +131,7 @@ const beats: Beat[] = [
         took_ms: 0,
         error: e instanceof Error ? e.message : "The build did not finish.",
       }));
-      return `${count(f.heavy_limited + f.light_limited)} queries from the flooding store limited; other stores' p99 ${ms(f.others_p99_before_ms)} before, ${ms(f.others_p99_during_ms)} during. Three lines of YAML added: breakdown by payment method is building from the mirror, without touching the main database, while queries keep answering.`;
+      return `${count(f.heavy_limited + f.light_limited)} queries from the flooding store limited; other stores' p99 ${ms(f.others_p99_before_ms)} before, ${ms(f.others_p99_during_ms)} during. One line of YAML added: breakdown by payment method is building from the mirror, without touching the main database, while queries keep answering.`;
     },
   },
   {

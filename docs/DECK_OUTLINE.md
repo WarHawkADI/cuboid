@@ -1,5 +1,7 @@
 # Deck outline
 
+The built deck: [Cuboid_Final_Deck.pptx](Cuboid_Final_Deck.pptx), with speaker notes on every slide, and a [PDF copy](Cuboid_Final_Deck.pdf). Each slide answers a named PRD clause and cites the files behind its numbers.
+
 Ten slides, one idea each. The built deck is the team's private Cuboid pitch deck, with speaker notes. Every number comes from `artifacts/`, measured on one laptop.
 
 0. **Cover.**

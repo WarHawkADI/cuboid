@@ -8,7 +8,7 @@
 |---|---|
 | **Run it** | [Quick start](README.md#quick-start) |
 | **The demo** | [Recording](docs/media/demo_walkthrough.webm) · [runbook with timings and fallbacks](docs/DEMO_RUNBOOK.md) · [video script](docs/DEMO_VIDEO_SCRIPT.md) |
-| **The pitch** | [Deck outline](docs/DECK_OUTLINE.md) · [15 hard questions](docs/PITCH_QA.md) · [judge FAQ](docs/JUDGE_FAQ.md) |
+| **The pitch** | [Deck (PowerPoint)](docs/Cuboid_Final_Deck.pptx) · [PDF](docs/Cuboid_Final_Deck.pdf) · [15 hard questions](docs/PITCH_QA.md) · [judge FAQ](docs/JUDGE_FAQ.md) |
 | **The proof** | [Scorecard](docs/TARGETS.md) · [benchmarks](docs/BENCHMARKS.md) · [every PRD line traced](docs/REQUIREMENTS.md) · [raw results](artifacts/) |
 | **The honest list** | [Final report: what is done, what is not](docs/FINAL_REPORT.md) |
 
@@ -91,7 +91,7 @@ Three ideas carry the design:
 | 4 | New data | An order appears in about a second. Cancelled, it moves |
 | 5 | Correct | A check at an exact WAL position, with arbitrary timestamps, during writes |
 | 6 | Separate | Another store's key gets a 404. The drills inject INC-02: 0 leaked |
-| 7 | The bonuses | A flood gets limited, and three lines of YAML add a breakdown |
+| 7 | The bonuses | A flood gets limited, and one line of YAML add a breakdown |
 | 8 | The scorecard | The weak rows, said before anyone asks |
 | 9 | Close | The new breakdown, now live |
 

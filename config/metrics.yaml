@@ -75,4 +75,3 @@ rollups:
   alert_tactic:      {source: soc_alerts, dims: [tactic, severity],    grains: {hour: 35d, day: all, month: all}}
   alert_source:      {source: soc_alerts, dims: [source_product, severity], grains: {day: all, month: all}}
   alert_asset:       {source: soc_alerts, dims: [severity, asset_id],  grains: {day: all, month: all}, key_dim: asset_id}
-  status_payment:  {source: orders, dims: [status, payment_method], grains: {hour: 35d, day: all, month: all}}

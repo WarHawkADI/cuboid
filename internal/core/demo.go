@@ -11,7 +11,7 @@ import (
 	"cuboid/internal/query"
 )
 
-// The demo's bonus B-4 beat: three lines of YAML, added to the real config
+// The demo's bonus B-4 beat: one line of YAML, added to the real config
 // file and applied by the real reload path.
 const demoMetricName = "status_payment"
 const demoMetricLine = "  status_payment:  {source: orders, dims: [status, payment_method], grains: {hour: 35d, day: all, month: all}}\n"

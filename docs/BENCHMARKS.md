@@ -70,4 +70,4 @@ Ratios of values under 10 ms are mostly noise; the absolute difference is publis
 - Isolation and chaos totals are on the Results page and in `artifacts/`, with the tier each ran at.
 - `REPLICA IDENTITY FULL`'s extra WAL has not been measured.
 
-Generated 31 October 2026 18:51.
+Generated 31 October 2026 19:56.

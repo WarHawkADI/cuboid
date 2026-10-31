@@ -20,7 +20,7 @@ About 4 minutes. Open <http://localhost:8080/monitor>, press **Run demo**, and p
 | 4 | New data | "Add an order and it shows up. Cancel it and it moves from placed to cancelled." | The millisecond figures |
 | 5 | Correct | "Checked against the main database at an exact point in the WAL, with arbitrary timestamps, while writes run." | The verdict, and both timings |
 | 6 | Separate | "INC-02. One store's key on another store is not found. Then we inject that exact bug into our own code." | "0 leaked" |
-| 7 | The bonuses | "The biggest store floods heavy queries and gets limited. Others do not notice. Three lines of YAML add a new breakdown, built from the mirror without touching the main database." | The other stores' p99 |
+| 7 | The bonuses | "The biggest store floods heavy queries and gets limited. Others do not notice. One line of YAML add a new breakdown, built from the mirror without touching the main database." | The other stores' p99 |
 | 8 | The scorecard | Scroll to the targets. Say the weak rows before anyone asks. | The verdict column |
 | 9 | Close | "Fast for every store. Exact to the paisa. Never in the wrong store's hands." | The new breakdown, now live |
 

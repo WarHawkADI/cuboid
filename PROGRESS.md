@@ -57,4 +57,4 @@ Bugs found against real Postgres need database-level tests: CHECK before ON CONF
 See artifacts/ and the Results page.
 
 ## Loop ledger
-win rounds: 0 | audit passes: 0 | autopilot rehearsals: see docs/FINAL_REPORT.md. Left out at the team's request.
+win rounds: 0 | audit passes: 0 | autopilot rehearsals: 3 in a row on the final build (failures: 0). Left out at the team's request.
