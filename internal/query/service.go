@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -66,6 +67,7 @@ type Service struct {
 	Fresh func() store.Freshness
 	sf    singleflight.Group
 
+	StaleServed        atomic.Int64
 	CrossTenantBlocked atomic.Int64
 	Coalesced          atomic.Int64
 }
@@ -90,6 +92,52 @@ type errCrossTenant struct {
 
 func (e *errCrossTenant) Error() string {
 	return fmt.Sprintf("result row for store %d outside the requested stores %v", e.got, e.want)
+}
+
+// topLimit asks the store for only the largest groups. total comes back with
+// them: the measure over all groups, which shares are computed from.
+type topLimit struct {
+	measure string
+	n       int
+	total   int64
+}
+
+// pushdown returns a limit when a top-N list is keyed by ids, the case with
+// many groups: products and customers. Text dimensions have few groups and sort
+// by label on ties, which the database cannot do from dictionary ids.
+func pushdown(req *Request, plan *planner.Plan) *topLimit {
+	if req.Endpoint != EpTop || plan.Rollup == nil || !plan.Source.Dimensions.Get(req.Top.Dim).IsKey() {
+		return nil
+	}
+	return &topLimit{measure: req.Measure, n: req.N}
+}
+
+// staleServe bounds how old an answer may be served while its refresh runs.
+const staleServe = 2 * time.Second
+
+// refresh recomputes an entry in the background, once per data version.
+func (s *Service) refresh(t Target, req *Request, plan *planner.Plan, key string, cells, edgeRows float64, heavy bool) {
+	versions := s.Hist.Snapshot(t.Tenants)
+	flightKey := fmt.Sprintf("%s|%s|%v", t.Partition, key, versions)
+	s.sf.DoChan(flightKey, func() (result any, err error) {
+		defer func() {
+			if p := recover(); p != nil {
+				err = fmt.Errorf("query panicked: %v", p)
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		release, err := s.Limits.Acquire(ctx, t.Partition, heavy)
+		if err != nil {
+			return nil, err // limited: the next request tries again
+		}
+		defer release()
+		r, err := s.compute(ctx, t, req, plan, cells, edgeRows, heavy)
+		if err == nil {
+			s.Cache.Put(t.Partition, key, cacheEntry(req, versions, r))
+		}
+		return r, err
+	})
 }
 
 // errWrongShape means a store result does not have this query's columns: the
@@ -119,7 +167,7 @@ func (s *Service) Execute(ctx context.Context, t Target, req *Request, opt ExecO
 	}
 	heavy := cells+edgeRows > float64(lim.HeavyCost)
 
-	key := req.Canonical
+	key := cacheKey(req)
 	if s.Drill.Mode() == DrillSharedCache {
 		if r, ok := s.Drill.sharedGet(key); ok {
 			for _, x := range r.tenants {
@@ -138,6 +186,19 @@ func (s *Service) Execute(ctx context.Context, t Target, req *Request, opt ExecO
 			r := e.Value.(*Response).withCache("hit")
 			r.Freshness = s.freshness(s.Fresh())
 			r.Meta.Timing.Total = ms(time.Since(start))
+			return r, nil
+		}
+		// New data arrived. On a busy store that is every flush, and making
+		// every viewer wait for the same recomputation is what hurts: serve the
+		// answer we have, exact as of when it was computed and labelled so, and
+		// refresh it once in the background.
+		if e, ok := s.Cache.Peek(t.Partition, key); ok && time.Since(e.Created) < staleServe {
+			r := e.Value.(*Response).withCache("stale")
+			r.Freshness = s.freshness(r.state)
+			r.Freshness.Stale = true
+			r.Meta.Timing.Total = ms(time.Since(start))
+			s.StaleServed.Add(1)
+			s.refresh(t, req, plan, key, cells, edgeRows, heavy)
 			return r, nil
 		}
 	}
@@ -174,7 +235,7 @@ func (s *Service) Execute(ctx context.Context, t Target, req *Request, opt ExecO
 		r = r.withCache("coalesced")
 	}
 	if useCache && !shared {
-		s.Cache.Put(t.Partition, key, &cache.Entry{Versions: versions, From: req.Query.From, To: req.Query.To, Value: r, Tenants: r.tenants})
+		s.Cache.Put(t.Partition, key, cacheEntry(req, versions, r))
 	}
 	if s.Drill.Mode() == DrillSharedCache {
 		s.Drill.sharedPut(key, r)
@@ -234,18 +295,19 @@ func (s *Service) compute(ctx context.Context, t Target, req *Request, plan *pla
 		s.Drill.injected()
 	}
 	err := s.Store.ReadTx(ctx, t.Tenants, opt, func(tx pgx.Tx, f store.Freshness) error {
-		res, err := s.read(ctx, tx, act.Cfg, plan, t)
+		top := pushdown(req, plan)
+		res, err := s.read(ctx, tx, act.Cfg, plan, t, top)
 		if err != nil {
 			return err
 		}
 		storeMS := ms(time.Since(storeStart))
-		data, err := s.shape(ctx, tx, act.Cfg, req, plan, res, t)
+		data, err := s.shape(ctx, tx, act.Cfg, req, plan, res, t, top)
 		if err != nil {
 			return err
 		}
 		resp = &Response{
 			Query: req.Echo, From: timeutil.Format(req.Query.From, s.Loc), To: timeutil.Format(req.Query.To, s.Loc),
-			Data: data, Freshness: s.freshness(f), tenants: tenantsOf(res),
+			Data: data, Freshness: s.freshness(f), tenants: tenantsOf(res), state: f,
 			Meta: Meta{Plan: describePlan(plan, s.Loc, cells, edgeRows), Cache: "miss", Exact: true, Heavy: heavy,
 				Timing: Timing{Store: storeMS}},
 		}
@@ -258,7 +320,7 @@ func (s *Service) compute(ctx context.Context, t Target, req *Request, plan *pla
 }
 
 // read runs the plan's SQL and returns the result keyed by raw values.
-func (s *Service) read(ctx context.Context, tx pgx.Tx, cfg *config.Config, plan *planner.Plan, t Target) (planner.Result, error) {
+func (s *Service) read(ctx context.Context, tx pgx.Tx, cfg *config.Config, plan *planner.Plan, t Target, top *topLimit) (planner.Result, error) {
 	res := planner.Result{}
 	if plan.Rollup == nil {
 		return res, nil
@@ -270,6 +332,9 @@ func (s *Service) read(ctx context.Context, tx pgx.Tx, cfg *config.Config, plan 
 	}
 	if !ok {
 		return res, nil
+	}
+	if top != nil {
+		sql = store.TopSQL(sql, len(plan.Pos), top.measure, top.n)
 	}
 	rows, err := tx.Query(ctx, sql, args...)
 	if err != nil {
@@ -291,6 +356,9 @@ func (s *Service) read(ctx context.Context, tx pgx.Tx, cfg *config.Config, plan 
 		}
 		for i := range r.vals {
 			dest = append(dest, &r.vals[i])
+		}
+		if top != nil {
+			dest = append(dest, &top.total)
 		}
 		if err := rows.Scan(dest...); err != nil {
 			rows.Close()
@@ -475,18 +543,97 @@ func (st *Stats) Cost(pl *planner.Plan, tenants []int32, loc *time.Location) (ce
 	return cells, edgeRows
 }
 
+// presetMaxAge bounds how long an answer for a moving range such as last_7d
+// is reused. It always echoes the from and to it was computed for.
+const presetMaxAge = 30 * time.Second
+
+// cacheKey is per query. A moving preset is keyed by name, not by its instants:
+// those change every second, which would make every viewer's refresh a miss.
+func cacheKey(req *Request) string {
+	if req.Range != "" {
+		return req.Stable
+	}
+	return req.Canonical
+}
+
+// cacheEntry records what an answer depends on. For a moving preset any new
+// change invalidates it, even one after its to: the viewer asked about now.
+func cacheEntry(req *Request, versions map[int32]int64, r *Response) *cache.Entry {
+	e := &cache.Entry{Versions: versions, From: req.Query.From, To: req.Query.To, Value: r, Tenants: r.tenants, Created: time.Now()}
+	if req.Range != "" {
+		e.To = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+		e.Expires = time.Now().Add(presetMaxAge)
+	}
+	return e
+}
+
+// checkTop proves the pushed-down top-N against the full result of the same
+// snapshot: same rows, same order, same total.
+func checkTop(src *config.Source, req *Request, full, top planner.Result, limit *topLimit) error {
+	mi := src.MeasureIndex(limit.measure)
+	type row struct {
+		k planner.ResultKey
+		v int64
+	}
+	var all []row
+	var total int64
+	for k, v := range full {
+		total += v[mi]
+		if v[mi] != 0 {
+			all = append(all, row{k, v[mi]})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].v != all[j].v {
+			return all[i].v > all[j].v
+		}
+		if all[i].k.Tenant != all[j].k.Tenant {
+			return all[i].k.Tenant < all[j].k.Tenant
+		}
+		a, _ := strconv.ParseInt(all[i].k.K[0], 10, 64)
+		b, _ := strconv.ParseInt(all[j].k.K[0], 10, 64)
+		return a < b
+	})
+	if len(all) > limit.n {
+		all = all[:limit.n]
+	}
+	if len(top) != len(all) {
+		return fmt.Errorf("top %d: %d rows from the store, %d expected", limit.n, len(top), len(all))
+	}
+	for _, r := range all {
+		if v, ok := top[r.k]; !ok || v[mi] != r.v {
+			return fmt.Errorf("top %d: %v should be %d", limit.n, r.k, r.v)
+		}
+	}
+	if len(all) > 0 && limit.total != total {
+		return fmt.Errorf("top %d: total %d from the store, %d expected", limit.n, limit.total, total)
+	}
+	return nil
+}
+
 // EvalAt evaluates a plan in a fresh AGG snapshot and calls onSnapshot as
 // soon as that snapshot is taken (the fenced verifier then lets the next
-// flush proceed). It returns the raw result for exact comparison.
-func (s *Service) EvalAt(ctx context.Context, t Target, plan *planner.Plan, onSnapshot func()) (planner.Result, error) {
+// flush proceed). It returns the raw result for exact comparison, and checks
+// the request's pushed-down form, if it has one, against it.
+func (s *Service) EvalAt(ctx context.Context, t Target, req *Request, plan *planner.Plan, onSnapshot func()) (planner.Result, error) {
 	var res planner.Result
 	called := false
 	err := s.Store.ReadTx(ctx, t.Tenants, store.ReadOptions{}, func(tx pgx.Tx, _ store.Freshness) error {
 		onSnapshot()
 		called = true
-		r, err := s.read(ctx, tx, s.Active().Cfg, plan, t)
+		r, err := s.read(ctx, tx, s.Active().Cfg, plan, t, nil)
 		res = r
-		return err
+		if err != nil {
+			return err
+		}
+		if limit := pushdown(req, plan); limit != nil {
+			top, err := s.read(ctx, tx, s.Active().Cfg, plan, t, limit)
+			if err != nil {
+				return err
+			}
+			return checkTop(plan.Source, req, r, top, limit)
+		}
+		return nil
 	})
 	if !called {
 		onSnapshot()

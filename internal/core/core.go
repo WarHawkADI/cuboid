@@ -235,7 +235,7 @@ func New(ctx context.Context, opt Options) (*Core, error) {
 			c.RebuildFromMain("a check against the main database failed")
 		}
 	}
-	c.Sampler = &verify.Sampler{V: c.Verify, Members: c.Members, Every: 3 * time.Second}
+	c.Sampler = &verify.Sampler{V: c.Verify, Members: c.Members, Every: 30 * time.Second}
 	c.API = &query.API{Svc: c.Svc, Keys: c.Keys, Members: c.Members, Verify: c.Verify.HTTP, Hub: c.Hub}
 	return c, nil
 }

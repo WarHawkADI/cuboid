@@ -93,7 +93,9 @@ type Statement struct {
 }
 
 // BuildRollup returns the set-based statements that compute one rollup's
-// cells from the mirror, for the given tenants (nil means all). Coarser
+// cells from the mirror, for the given tenants (nil means all). Rows go in
+// primary-key order so a store's buckets sit together on disk: a range then
+// reads a few thousand pages instead of one page per cell. Coarser
 // grains are summed from a finer grain when that grain is kept for all time,
 // so the mirror is scanned once per rollup instead of once per grain.
 func BuildRollup(cfg *config.Config, r *config.Rollup, loc *time.Location, now time.Time, n Names, tenants []int32) []Statement {
@@ -128,7 +130,8 @@ func BuildRollup(cfg *config.Config, r *config.Rollup, loc *time.Location, now t
 			out = append(out, Statement{SQL: fmt.Sprintf(`INSERT INTO %s (tenant_id, rollup, grain, bucket, k1, k2, k3, %s)
 				SELECT tenant_id, rollup, %d, date_trunc(%s, bucket, %s), k1, k2, k3, %s
 				FROM %s WHERE rollup = %d AND grain = %d AND ($1::int[] IS NULL OR tenant_id = ANY($1))
-				GROUP BY tenant_id, rollup, 4, k1, k2, k3`,
+				GROUP BY tenant_id, rollup, 4, k1, k2, k3
+				ORDER BY tenant_id, 4, k1, k2, k3`,
 				cells, strings.Join(measureCols, ", "), g, quoteLiteral(g.String()), tz, strings.Join(sumCells, ", "),
 				cells, r.ID, derivable), Args: []any{tenantArg}})
 			continue
@@ -142,7 +145,8 @@ func BuildRollup(cfg *config.Config, r *config.Rollup, loc *time.Location, now t
 			FROM %s f
 			%s
 			WHERE ($1::int[] IS NULL OR f.%s = ANY($1)) AND f.%s >= $2
-			GROUP BY 1, 4, 5, 6, 7`,
+			GROUP BY 1, 4, 5, 6, 7
+			ORDER BY 1, 4, 5, 6, 7`,
 			cells, strings.Join(measureCols, ", "),
 			tcol, r.ID, g, quoteLiteral(g.String()), tcolumn, tz, k[0], k[1], k[2], strings.Join(sums, ", "),
 			n.Mirror(src.Name), j.String(), tcol, tcolumn), Args: []any{tenantArg, since}})
@@ -216,7 +220,7 @@ func QuerySQL(pl *planner.Plan, enc Encoder, loc *time.Location, n Names) (sql s
 	for _, m := range src.Measures.Values() {
 		mcols = append(mcols, QuoteIdent(m.Name))
 		mrow = append(mrow, measureRowExpr(m))
-		msum = append(msum, fmt.Sprintf("sum(%s)::bigint", QuoteIdent(m.Name)))
+		msum = append(msum, fmt.Sprintf("sum(%s)::bigint AS %s", QuoteIdent(m.Name), QuoteIdent(m.Name)))
 	}
 	filterIDs := map[string]int64{}
 	for dim, v := range q.Filters {
@@ -271,13 +275,29 @@ func QuerySQL(pl *planner.Plan, enc Encoder, loc *time.Location, n Names) (sql s
 	if q.Interval != timeutil.GrainNone {
 		bucket = fmt.Sprintf("extract(epoch FROM date_trunc(%s, t, %s))::bigint", quoteLiteral(q.Interval.String()), tz)
 	}
-	sel := []string{"tenant_id", bucket}
+	sel := []string{"tenant_id", bucket + " AS bucket_id"}
 	group := []string{"1", "2"}
 	for i, pos := range pl.Pos {
-		sel = append(sel, fmt.Sprintf("k%d", pos+1))
+		sel = append(sel, fmt.Sprintf("k%d AS key%d", pos+1, i))
 		group = append(group, strconv.Itoa(3+i))
 	}
 	sql = fmt.Sprintf("SELECT %s, %s FROM (\n%s\n) s GROUP BY %s",
 		strings.Join(sel, ", "), strings.Join(msum, ", "), strings.Join(parts, "\nUNION ALL\n"), strings.Join(group, ", "))
 	return sql, args, true, nil
+}
+
+// TopSQL narrows a QuerySQL statement to the n largest groups by a measure,
+// ordered value DESC, then store and key ASC, the API's top-N order. Only the
+// database sees every group, so a store's busiest list costs one sort rather
+// than sending every customer to the application. The last column is the total
+// of the measure over all groups, for shares. Key dimensions only: ids sort as
+// their labels do, and a dictionary id does not sort as its text.
+func TopSQL(sql string, nKeys int, measure string, n int) string {
+	m := QuoteIdent(measure)
+	order := []string{m + " DESC", "tenant_id"}
+	for i := 0; i < nKeys; i++ {
+		order = append(order, "key"+strconv.Itoa(i))
+	}
+	return fmt.Sprintf("SELECT *, sum(%s) OVER ()::bigint AS total_measure FROM (%s) g WHERE %s <> 0 ORDER BY %s LIMIT %d",
+		m, sql, m, strings.Join(order, ", "), n)
 }

@@ -38,6 +38,7 @@ type Request struct {
 	ByStore   bool
 	Echo      map[string]any
 	Canonical string
+	Stable    string // Canonical without the resolved instants
 }
 
 // Problem is an RFC 7807-style error in Cuboid's plain voice.
@@ -190,7 +191,7 @@ func (p *Parser) Parse(ep string, src *config.Source, tl *config.TopList, v url.
 	case EpCount:
 		req.Measure = src.CountMeasure
 	}
-	req.Canonical = canonical(req)
+	req.Canonical, req.Stable = canonical(req)
 	return req, nil
 }
 
@@ -265,7 +266,7 @@ func (p *Parser) checkValue(d *config.Dimension, val string) *Problem {
 	return nil
 }
 
-func canonical(r *Request) string {
+func canonical(r *Request) (string, string) {
 	keys := make([]string, 0, len(r.Echo))
 	for k := range r.Echo {
 		keys = append(keys, k)
@@ -275,6 +276,7 @@ func canonical(r *Request) string {
 	for _, k := range keys {
 		fmt.Fprintf(&b, "%s=%v;", k, r.Echo[k])
 	}
+	stable := b.String()
 	fmt.Fprintf(&b, "[%d,%d)", r.Query.From.UnixMilli(), r.Query.To.UnixMilli())
-	return b.String()
+	return b.String(), stable
 }

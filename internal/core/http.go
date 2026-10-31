@@ -427,7 +427,7 @@ func (c *Core) monitorState(w http.ResponseWriter, r *http.Request) {
 		"pipeline":   pipe,
 		"alarms":     c.Alarms.List(),
 		"latency":    c.Svc.Latency.Snapshot(),
-		"cache":      map[string]any{"hits": hits, "misses": misses, "coalesced": c.Svc.Coalesced.Load()},
+		"cache":      map[string]any{"hits": hits, "misses": misses, "coalesced": c.Svc.Coalesced.Load(), "stale": c.Svc.StaleServed.Load()},
 		"limiter":    c.Limits.Snapshot(),
 		"rate_429":   c.Limits.Rate429.Load(),
 		"rebuild":    c.Rebuild.Snapshot(),

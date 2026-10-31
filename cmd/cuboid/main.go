@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
@@ -95,6 +96,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		}
 	}()
 	go c.WatchConfig(ctx)
+	if a := os.Getenv("CUBOID_PPROF"); a != "" { // profiling, on an address of the operator's choosing
+		go func() { log.Warn("pprof", "err", http.ListenAndServe(a, http.DefaultServeMux)) }()
+	}
 	runErr := c.Run(ctx)
 	shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -53,6 +53,7 @@ type gen struct {
 	client    *http.Client
 
 	mu      sync.Mutex
+	setMu   sync.Mutex // one path switch at a time, so the path and the baseline's cache agree
 	mode    string
 	viewers int
 	cancel  context.CancelFunc
@@ -82,7 +83,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	g := &gen{log: log, mode: "off", cuboidURL: env("LOADGEN_CUBOID_URL", "http://localhost:8080"), naiveURL: env("LOADGEN_NAIVE_URL", "http://localhost:8083"),
-		client: &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{MaxIdleConns: 4000, MaxIdleConnsPerHost: 4000, IdleConnTimeout: 90 * time.Second}}}
+		client: &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{MaxConnsPerHost: 256, MaxIdleConns: 512, MaxIdleConnsPerHost: 256, IdleConnTimeout: 90 * time.Second}}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /state", g.state)
 	mux.HandleFunc("POST /control", g.control)
@@ -180,6 +181,8 @@ func (g *gen) assign(n int) []store {
 }
 
 func (g *gen) set(ctx context.Context, mode string, viewers int) error {
+	g.setMu.Lock()
+	defer g.setMu.Unlock()
 	switch mode {
 	case "off", "direct", "direct-cache", "cuboid":
 	default:

@@ -316,7 +316,7 @@ func (c *Core) RebuildFromMirror(ctx context.Context, tenants []int32, rollups [
 		if _, err := tx.Exec(ctx, del, args...); err != nil {
 			return c.Rebuild.Fail(err)
 		}
-		if _, err := tx.Exec(ctx, fmt.Sprintf("INSERT INTO %s SELECT * FROM %s", store.QuoteIdent(live), store.QuoteIdent(live+"_shadow"))); err != nil {
+		if _, err := tx.Exec(ctx, fmt.Sprintf("INSERT INTO %s SELECT * FROM %s ORDER BY tenant_id, rollup, grain, bucket, k1, k2, k3", store.QuoteIdent(live), store.QuoteIdent(live+"_shadow"))); err != nil {
 			return c.Rebuild.Fail(err)
 		}
 		if _, err := tx.Exec(ctx, "DROP TABLE "+store.QuoteIdent(live+"_shadow")); err != nil {

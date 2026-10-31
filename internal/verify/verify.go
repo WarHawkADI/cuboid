@@ -174,7 +174,7 @@ func (v *Verifier) fenced(ctx context.Context, t query.Target, req *query.Reques
 		select {
 		case fr := <-reached:
 			start := time.Now()
-			r, err := v.Svc.EvalAt(ctx, t, plan, func() { close(fr.Release) })
+			r, err := v.Svc.EvalAt(ctx, t, req, plan, func() { close(fr.Release) })
 			aggc <- agg{res: r, ms: msSince(start), err: err}
 		case <-time.After(15 * time.Second):
 			aggc <- agg{err: errors.New("the stream did not reach the fence within 15 s")}

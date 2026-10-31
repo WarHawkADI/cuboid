@@ -114,7 +114,9 @@ type Entry struct {
 	Versions map[int32]int64
 	From, To time.Time
 	Value    any
-	Tenants  []int32 // tenant ids taken from the result rows
+	Tenants  []int32   // tenant ids taken from the result rows
+	Expires  time.Time // zero: no time limit
+	Created  time.Time
 }
 
 // Cache is the partitioned store.
@@ -154,8 +156,14 @@ func (c *Cache) Get(p, key string) (*Entry, bool) {
 	return e, true
 }
 
+// Peek returns an entry from partition p whether or not it is still valid.
+func (c *Cache) Peek(p, key string) (*Entry, bool) { return c.part(p).Peek(key) }
+
 // Valid reports whether an entry still matches the data.
 func (c *Cache) Valid(e *Entry) bool {
+	if !e.Expires.IsZero() && time.Now().After(e.Expires) {
+		return false
+	}
 	for t, v := range e.Versions {
 		if !c.hist.Unchanged(t, v, e.From, e.To) {
 			return false

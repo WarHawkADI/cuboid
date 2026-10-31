@@ -31,6 +31,7 @@ type Response struct {
 	// tenants are the stores the result rows came from. The response guard
 	// checks them against the key's scope before anything is written.
 	tenants []int32
+	state   store.Freshness // the store state this answer was read at
 }
 
 // Tenants returns the stores the data came from.
@@ -148,7 +149,7 @@ type Series struct {
 	Points []Point `json:"points"`
 }
 
-func (s *Service) shape(ctx context.Context, tx pgx.Tx, cfg *config.Config, req *Request, pl *planner.Plan, res planner.Result, t Target) (any, error) {
+func (s *Service) shape(ctx context.Context, tx pgx.Tx, cfg *config.Config, req *Request, pl *planner.Plan, res planner.Result, t Target, top *topLimit) (any, error) {
 	src := req.Source
 	mi := src.MeasureIndex(req.Measure)
 	switch req.Endpoint {
@@ -181,13 +182,13 @@ func (s *Service) shape(ctx context.Context, tx pgx.Tx, cfg *config.Config, req 
 		if req.ByStore {
 			return s.shapeByStore(req, res, mi, t), nil
 		}
-		items, err := s.items(ctx, tx, cfg, req, res, mi, req.BreakDim)
+		items, err := s.items(ctx, tx, cfg, req, res, mi, req.BreakDim, nil)
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{"by": req.BreakDim, "metric": req.Measure, "items": items}, nil
 	case EpTop:
-		items, err := s.items(ctx, tx, cfg, req, res, mi, req.Top.Dim)
+		items, err := s.items(ctx, tx, cfg, req, res, mi, req.Top.Dim, top)
 		if err != nil {
 			return nil, err
 		}
@@ -213,7 +214,7 @@ func pow10(n int) int64 {
 // items groups a result by one dimension. Key dimensions (product, customer)
 // stay separate per store, because product 5 of one store is not product 5
 // of another; text dimensions (status, category) are summed across stores.
-func (s *Service) items(ctx context.Context, tx pgx.Tx, cfg *config.Config, req *Request, res planner.Result, mi int, dimName string) ([]Item, error) {
+func (s *Service) items(ctx context.Context, tx pgx.Tx, cfg *config.Config, req *Request, res planner.Result, mi int, dimName string, top *topLimit) ([]Item, error) {
 	src := req.Source
 	dim := src.Dimensions.Get(dimName)
 	m := src.Measures.Values()[mi]
@@ -230,6 +231,9 @@ func (s *Service) items(ctx context.Context, tx pgx.Tx, cfg *config.Config, req 
 		}
 		sums[kk] += v[mi]
 		total += v[mi]
+	}
+	if top != nil {
+		total = top.total // the rows are only the largest groups; the total is of them all
 	}
 	items := make([]Item, 0, len(sums))
 	for k, v := range sums {

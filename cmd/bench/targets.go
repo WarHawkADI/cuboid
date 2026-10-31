@@ -339,8 +339,19 @@ type batchOut struct {
 }
 
 func (w *world) batch(n int) batchOut {
-	code, err := postJSON(fmt.Sprintf("%s/admin/verify-batch?n=%d", cuboidURL, n), w.op, map[string]any{}, nil)
+	// Someone may have pressed Verify everything: wait for that batch rather
+	// than abandon the run, which would also leave the store app paused.
+	var code int
+	var err error
+	for i := 0; i < 600; i++ {
+		code, err = postJSON(fmt.Sprintf("%s/admin/verify-batch?n=%d", cuboidURL, n), w.op, map[string]any{}, nil)
+		if err != nil || code != 409 {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
 	if err != nil || code != 202 {
+		postJSON(appURL+"/control/rates", "", map[string]any{"paused": false}, nil)
 		fatal(fmt.Errorf("start batch: %v status %d", err, code))
 	}
 	t0 := time.Now()
