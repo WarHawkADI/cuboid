@@ -32,7 +32,6 @@ type DrillReport struct {
 	BlockedSum int64               `json:"blocked"`
 	Leaked     int                 `json:"leaked"`
 	Statuses   map[int]int         `json:"statuses"`
-	P50, P99   float64             `json:"-"`
 	Latency    monitor.Percentiles `json:"latency"`
 	Finished   time.Time           `json:"finished"`
 }
@@ -44,7 +43,7 @@ type FloodReport struct {
 	Heavy           int       `json:"heavy_requests"`
 	HeavyOK         int       `json:"heavy_answered"`
 	HeavyLimited    int       `json:"heavy_limited"`
-	KeyLimited      int       `json:"key_rate_limited"`
+	LightLimited    int       `json:"light_limited"`
 	LightOK         int       `json:"own_light_answered"`
 	LightFailed     int       `json:"own_light_failed"`
 	OthersBeforeP99 float64   `json:"others_p99_before_ms"`
@@ -105,7 +104,11 @@ func (c *Core) RunDrill(ctx context.Context, mode query.DrillMode, dur time.Dura
 	queries := c.drillQueries()
 	get := func(ctx context.Context, store int32, q string) (int, []byte) {
 		req := httptest.NewRequestWithContext(ctx, "GET", fmt.Sprintf("/tenants/%d%s", store, q), nil)
-		req.Header.Set("Authorization", "Bearer "+c.DemoKey(auth.Store, store))
+		key := c.DemoKey(auth.Store, store)
+		if c.Svc.Drill.Mode() == query.DrillOff {
+			key = c.DemoKey(auth.Operator, 0) // the right answer, without spending the store's rate
+		}
+		req.Header.Set("Authorization", "Bearer "+key)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		var body struct {
@@ -124,6 +127,12 @@ func (c *Core) RunDrill(ctx context.Context, mode query.DrillMode, dur time.Dura
 				return nil, fmt.Errorf("drill baseline for store %d %s returned %d", s, q, code)
 			}
 			expected[s][q] = string(data)
+		}
+	}
+	for _, s := range stores {
+		if sc, ok := c.Keys.Authenticate(c.DemoKey(auth.Store, s)); ok {
+			c.Limits.Exempt(sc.Prefix, true)
+			defer c.Limits.Exempt(sc.Prefix, false)
 		}
 	}
 	before := c.Svc.Drill.Counts()
@@ -255,6 +264,10 @@ func (c *Core) RunFlood(ctx context.Context, store int32, dur time.Duration) (*F
 		}
 		return monitor.Summarise("others", lat).P99
 	}
+	if sc, ok := c.Keys.Authenticate(c.DemoKey(auth.Store, store)); ok {
+		c.Limits.Exempt(sc.Prefix, true)
+		defer c.Limits.Exempt(sc.Prefix, false)
+	}
 	rep := &FloodReport{Store: store}
 	rep.OthersBeforeP99 = measureOthers(3*time.Second, nil)
 	c.Rec.Annotate(fmt.Sprintf("Store %d floods heavy queries", store))
@@ -278,10 +291,10 @@ func (c *Core) RunFlood(ctx context.Context, store int32, dur time.Duration) (*F
 				case code == 429 && bytes.Contains(body, []byte("heavy")):
 					rep.HeavyLimited++
 				case code == 429:
-					rep.KeyLimited++
+					rep.LightLimited++
 				}
 				mu.Unlock()
-				time.Sleep(20 * time.Millisecond)
+				time.Sleep(250 * time.Millisecond)
 			}
 		}()
 	}
@@ -305,7 +318,7 @@ func (c *Core) RunFlood(ctx context.Context, store int32, dur time.Duration) (*F
 	rep.Seconds = time.Since(start).Seconds()
 	rep.Finished = time.Now()
 	c.lastFlood.Store(rep)
-	c.Rec.Annotate(fmt.Sprintf("Flood over: %d heavy queries limited, other stores unaffected", rep.HeavyLimited+rep.KeyLimited))
+	c.Rec.Annotate(fmt.Sprintf("Flood over: %d heavy queries limited, other stores unaffected", rep.HeavyLimited+rep.LightLimited))
 	return rep, nil
 }
 

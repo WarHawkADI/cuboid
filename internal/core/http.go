@@ -297,15 +297,15 @@ func (c *Core) adminVerifyBatch(w http.ResponseWriter, r *http.Request) {
 
 // BatchStatus is "Verify everything".
 type BatchStatus struct {
-	Running    bool             `json:"running"`
-	Total      int              `json:"total"`
-	Done       int              `json:"done"`
-	Exact      int              `json:"exact"`
-	Mismatch   int              `json:"mismatch"`
-	Failed     int              `json:"failed"`
-	StartedAt  time.Time        `json:"started_at"`
-	FinishedAt time.Time        `json:"finished_at"`
-	Last       []verify.Summary `json:"last,omitempty"`
+	Running    bool      `json:"running"`
+	Total      int       `json:"total"`
+	Done       int       `json:"done"`
+	Exact      int       `json:"exact"`
+	Mismatch   int       `json:"mismatch"`
+	Failed     int       `json:"failed"`
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at"`
+	Errors     []string  `json:"errors,omitempty"`
 }
 
 func (c *Core) runBatch(n int) {
@@ -333,6 +333,9 @@ func (c *Core) runBatch(n int) {
 		switch {
 		case err != nil:
 			c.batch.Failed++
+			if len(c.batch.Errors) < 5 {
+				c.batch.Errors = append(c.batch.Errors, err.Error())
+			}
 		case res.Exact:
 			c.batch.Exact++
 		default:

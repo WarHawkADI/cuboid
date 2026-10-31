@@ -14,6 +14,8 @@ type Ring struct {
 	mu   sync.Mutex
 	keep time.Duration
 	txns []ringEntry
+	// evicted is when the newest transaction that left the ring was applied.
+	evicted time.Time
 }
 
 type ringEntry struct {
@@ -35,16 +37,17 @@ func (r *Ring) Add(t *engine.Txn) {
 		cut++
 	}
 	if cut > 0 {
+		r.evicted = r.txns[cut-1].at
 		r.txns = append([]ringEntry(nil), r.txns[cut:]...)
 	}
 }
 
 // Between returns transactions with commit LSN in (lo, hi], and whether the
-// ring still covers everything after lo.
-func (r *Ring) Between(lo, hi uint64) ([]*engine.Txn, bool) {
+// ring still holds everything applied since the given time.
+func (r *Ring) Between(lo, hi uint64, since time.Time) ([]*engine.Txn, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	covered := len(r.txns) == 0 || r.txns[0].txn.CommitLSN <= lo || time.Since(r.txns[0].at) < r.keep
+	covered := r.evicted.Before(since)
 	var out []*engine.Txn
 	for _, e := range r.txns {
 		if e.txn.CommitLSN > lo && e.txn.CommitLSN <= hi {

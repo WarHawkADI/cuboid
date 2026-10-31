@@ -92,6 +92,10 @@ func (e *errCrossTenant) Error() string {
 	return fmt.Sprintf("result row for store %d outside the requested stores %v", e.got, e.want)
 }
 
+// errWrongShape means a store result does not have this query's columns: the
+// result of another query was delivered to this one.
+var errWrongShape = errors.New("the store result does not have this query's shape")
+
 // Execute answers a request for a target.
 func (s *Service) Execute(ctx context.Context, t Target, req *Request, opt ExecOptions) (*Response, *Problem) {
 	start := time.Now()
@@ -118,10 +122,17 @@ func (s *Service) Execute(ctx context.Context, t Target, req *Request, opt ExecO
 	key := req.Canonical
 	if s.Drill.Mode() == DrillSharedCache {
 		if r, ok := s.Drill.sharedGet(key); ok {
+			for _, x := range r.tenants {
+				if !contains(t.Tenants, x) {
+					s.Drill.injected() // this answer would cross stores without the guard
+					break
+				}
+			}
 			return r.withCache("hit"), nil
 		}
 	}
-	useCache := !opt.NoCache && s.Drill.Mode() != DrillSharedCache
+	// During a drill every request reaches the faulty path.
+	useCache := !opt.NoCache && s.Drill.Mode() == DrillOff
 	if useCache {
 		if e, ok := s.Cache.Get(t.Partition, key); ok {
 			r := e.Value.(*Response).withCache("hit")
@@ -135,13 +146,24 @@ func (s *Service) Execute(ctx context.Context, t Target, req *Request, opt ExecO
 	if opt.NoCache {
 		flightKey += "|" + strconv.FormatInt(rand.Int64(), 36)
 	}
-	v, err, shared := s.sf.Do(flightKey, func() (any, error) {
-		release, err := s.Limits.Acquire(ctx, t.Partition, heavy)
+	v, err, shared := s.sf.Do(flightKey, func() (result any, err error) {
+		// singleflight re-raises a panic where nothing can recover it, which
+		// would take the whole process down with one bad request.
+		defer func() {
+			if p := recover(); p != nil {
+				err = fmt.Errorf("query panicked: %v", p)
+			}
+		}()
+		// Detached: viewers share this computation, so the first viewer
+		// cancelling must not fail everyone else who is waiting on it.
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		release, err := s.Limits.Acquire(cctx, t.Partition, heavy)
 		if err != nil {
 			return nil, err
 		}
 		defer release()
-		return s.compute(ctx, t, req, plan, cells, edgeRows, heavy)
+		return s.compute(cctx, t, req, plan, cells, edgeRows, heavy)
 	})
 	if err != nil {
 		return nil, s.problemFor(err, t)
@@ -186,6 +208,10 @@ func (s *Service) problemFor(err error, t Target) *Problem {
 		s.Audit.Event(audit.Event{Kind: "cross_tenant_result_blocked", Severity: "P1", Tenant: t.ID, KeyPrefix: t.Scope.Prefix,
 			Detail: "result assertion (layer 5) stopped a store result containing another store's rows: " + ct.Error()})
 		return &Problem{Status: 500, Type: "internal", Title: "Internal error", Detail: "The answer failed an isolation check and was not sent."}
+	case errors.Is(err, errWrongShape):
+		s.Drill.blocked(LayerResultCheck)
+		s.Audit.Event(audit.Event{Kind: "wrong_result_blocked", Severity: "P1", Tenant: t.ID, KeyPrefix: t.Scope.Prefix, Detail: "result assertion (layer 5) stopped another query's result"})
+		return &Problem{Status: 500, Type: "internal", Title: "Internal error", Detail: "The answer failed an isolation check and was not sent."}
 	case errors.Is(err, store.ErrNoTenantContext):
 		s.Drill.blocked(LayerRowSecurity)
 		s.Audit.Event(audit.Event{Kind: "tenant_context_missing", Severity: "P1", Tenant: t.ID, KeyPrefix: t.Scope.Prefix,
@@ -194,7 +220,8 @@ func (s *Service) problemFor(err error, t Target) *Problem {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return &Problem{Status: 503, Type: "cancelled", Title: "Cancelled", Detail: "The request was cancelled before it finished."}
 	}
-	return &Problem{Status: 500, Type: "internal", Title: "Internal error", Detail: err.Error()}
+	s.Audit.Event(audit.Event{Kind: "query_failed", Severity: "P3", Tenant: t.ID, Detail: err.Error()})
+	return &Problem{Status: 500, Type: "internal", Title: "Internal error", Detail: "The query failed. Try again; if it persists, see the server log."}
 }
 
 // compute reads the answer from AGG under RLS and shapes it.
@@ -283,10 +310,17 @@ func (s *Service) read(ctx context.Context, tx pgx.Tx, cfg *config.Config, plan 
 			s.Drill.injected()
 		}
 	}
+	// Layer 5: assert every row before using any of them. The result must also
+	// have the shape this query asked for, or it is another query's answer.
 	for _, r := range raws {
 		if !contains(t.Tenants, r.tenant) {
 			return nil, &errCrossTenant{got: r.tenant, want: t.Tenants}
 		}
+		if len(r.keys) != nk || len(r.vals) != nm {
+			return nil, errWrongShape
+		}
+	}
+	for _, r := range raws {
 		k := planner.ResultKey{Tenant: r.tenant, Bucket: r.bucket}
 		for i, id := range r.keys {
 			dim := plan.Source.Dimensions.Get(plan.Query.GroupBy[i])

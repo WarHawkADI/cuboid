@@ -116,11 +116,11 @@ const beats: Beat[] = [
     title: "The bonuses",
     say: "The biggest store floods heavy queries and nobody else notices. A new breakdown from three lines of YAML, built from the mirror.",
     run: async (keys) => {
-      const f = await admin<{ heavy_limited: number; key_rate_limited: number; others_p99_before_ms: number; others_p99_during_ms: number }>("/admin/flood", { store: STORE, seconds: 5 });
+      const f = await admin<{ heavy_limited: number; light_limited: number; others_p99_before_ms: number; others_p99_during_ms: number }>("/admin/flood", { store: STORE, seconds: 5 });
       await admin("/admin/demo/metric", { add: false });
       const add = await admin<{ ok: boolean; took_ms: number }>("/admin/demo/metric", { add: true });
       const b = await get<Envelope<{ items: { label: string }[] }>>(`/tenants/${STORE}/orders/breakdown?by=payment_method&range=last_7d`, storeKey(keys, STORE));
-      return `${count(f.heavy_limited + f.key_rate_limited)} heavy queries limited; other stores' p99 ${ms(f.others_p99_before_ms)} before, ${ms(f.others_p99_during_ms)} during. Breakdown by payment method live in ${ms(add.took_ms)}: ${b.data.items.map((i) => i.label).join(", ")}.`;
+      return `${count(f.heavy_limited + f.light_limited)} queries from the flooding store limited; other stores' p99 ${ms(f.others_p99_before_ms)} before, ${ms(f.others_p99_during_ms)} during. Breakdown by payment method live in ${ms(add.took_ms)}: ${b.data.items.map((i) => i.label).join(", ")}.`;
     },
   },
   {

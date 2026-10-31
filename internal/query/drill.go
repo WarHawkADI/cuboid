@@ -75,9 +75,6 @@ func (d *Drill) sharedGet(key string) (*Response, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	r, ok := d.shared[key]
-	if ok {
-		d.Injected.Add(1)
-	}
 	return r, ok
 }
 

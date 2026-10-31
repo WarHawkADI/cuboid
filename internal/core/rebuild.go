@@ -25,7 +25,6 @@ func (c *Core) rebuildFromMain(ctx context.Context, reason string) error {
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	c.setState("rebuilding from main")
-	defer c.setState("streaming")
 	c.Rebuild.Start("main", "all stores", reason)
 	c.Rec.Annotate("Rebuild from scratch started")
 	cfg := c.Config()

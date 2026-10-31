@@ -175,7 +175,7 @@ func (p *Pipeline) CancelFence(token string) {
 
 // Txn implements cdc.Handler.
 func (p *Pipeline) Txn(ctx context.Context, txn *engine.Txn) error {
-	if txn.CommitLSN <= p.applied.Load() {
+	if alreadyApplied(txn.CommitLSN, p.applied.Load()) {
 		return nil // redelivered after a restart: already in AGG
 	}
 	if err := p.Engine.Apply(txn, p.delta); err != nil {
@@ -192,9 +192,24 @@ func (p *Pipeline) Txn(ctx context.Context, txn *engine.Txn) error {
 	return nil
 }
 
+// messagePosition is the applied position a logical decoding message allows.
+//
+// Postgres reports a message's LSN as the END of its WAL record, and a
+// commit's LSN as the START of its record. A commit written directly after a
+// message therefore has the same LSN as the message. Recording the message at
+// its own LSN would make that new transaction look already applied, and the
+// redelivery check in Txn would silently drop it. One less is still past every
+// earlier commit, and can never reach a later one.
+func messagePosition(lsn pglogrepl.LSN) pglogrepl.LSN { return lsn - 1 }
+
+// alreadyApplied is the redelivery check: after a restart Postgres may resend
+// transactions at or below the committed position.
+func alreadyApplied(commitLSN uint64, applied uint64) bool { return commitLSN <= applied }
+
 // Message implements cdc.Handler.
 func (p *Pipeline) Message(ctx context.Context, prefix, content string, lsn pglogrepl.LSN) error {
-	if uint64(lsn) <= p.applied.Load() {
+	pos := messagePosition(lsn)
+	if uint64(pos) <= p.applied.Load() {
 		return nil
 	}
 	switch prefix {
@@ -202,12 +217,12 @@ func (p *Pipeline) Message(ctx context.Context, prefix, content string, lsn pglo
 		if t, err := time.Parse(time.RFC3339Nano, content); err == nil {
 			p.heartbeat = t
 		}
-		if lsn > p.pending {
-			p.pending = lsn
+		if pos > p.pending {
+			p.pending = pos
 		}
 	case cdc.PrefixFence:
-		if lsn > p.pending {
-			p.pending = lsn
+		if pos > p.pending {
+			p.pending = pos
 		}
 		p.mu.Lock()
 		ch := p.fences[content]

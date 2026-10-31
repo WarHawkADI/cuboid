@@ -36,7 +36,9 @@ type Verifier struct {
 	Store    *store.Store
 	Loc      *time.Location
 	Limit    *rate.Limiter
-	one      sync.Mutex // one direct query at a time
+	// OnMismatch is told about every failed check: it is always a bug.
+	OnMismatch func(detail string)
+	one        sync.Mutex // one direct query at a time
 
 	Checks   atomic.Int64
 	Exact    atomic.Int64
@@ -114,7 +116,8 @@ func (v *Verifier) Check(ctx context.Context, t query.Target, req *query.Request
 	defer v.one.Unlock()
 	var res *Result
 	var err error
-	for attempt := 0; attempt < 5; attempt++ {
+	attempt := 0
+	for ; attempt < 5; attempt++ {
 		res, err = v.fenced(ctx, t, req)
 		if !errors.Is(err, errRingGap) {
 			break
@@ -123,6 +126,7 @@ func (v *Verifier) Check(ctx context.Context, t query.Target, req *query.Request
 	if err != nil {
 		return nil, err
 	}
+	res.Retries = attempt
 	v.record(t, req, res)
 	return res, nil
 }
@@ -147,6 +151,7 @@ func (v *Verifier) fenced(ctx context.Context, t query.Target, req *query.Reques
 	if p == nil {
 		return nil, errors.New("the change stream is not running")
 	}
+	began := time.Now()
 	tok := token()
 	reached := p.AwaitFence(tok)
 	defer p.CancelFence(tok)
@@ -201,7 +206,9 @@ func (v *Verifier) fenced(ctx context.Context, t query.Target, req *query.Reques
 	}
 	ring := p.Ring()
 	var rMinus, rPlus []*engine.Txn
-	recent, covered := ring.Between(0, uint64(walAfter))
+	// Transactions out of order with the fence commit around it, so a margin
+	// before this check began is enough.
+	recent, covered := ring.Between(0, uint64(walAfter), began.Add(-5*time.Second))
 	if !covered {
 		return nil, errRingGap
 	}
@@ -210,7 +217,9 @@ func (v *Verifier) fenced(ctx context.Context, t query.Target, req *query.Reques
 		if txn.CommitLSN < uint64(fence) && !visible {
 			rMinus = append(rMinus, txn)
 		}
-		if txn.CommitLSN > uint64(fence) && visible {
+		// A commit at exactly the fence's LSN comes straight after it in the
+		// WAL (see pipeline.messagePosition), so it counts as after the fence.
+		if txn.CommitLSN >= uint64(fence) && visible {
 			rPlus = append(rPlus, txn)
 		}
 	}
@@ -489,6 +498,9 @@ func (v *Verifier) record(t query.Target, req *query.Request, res *Result) {
 		v.Exact.Add(1)
 	} else {
 		v.Mismatch.Add(1)
+		if v.OnMismatch != nil {
+			v.OnMismatch(fmt.Sprintf("stores %v, %s, rollup-vs-direct: %s, fence %s, reconciled -%d +%d", t.Tenants, req.Canonical, strings.Join(res.Mismatches, "; "), res.FenceLSN, res.RMinus, res.RPlus))
+		}
 	}
 	s := Summary{At: time.Now(), Query: req.Canonical, Tenants: t.Tenants, Exact: res.Exact, CuboidMS: res.CuboidMS, DirectMS: res.DirectMS, RMinus: res.RMinus, RPlus: res.RPlus}
 	v.mu.Lock()

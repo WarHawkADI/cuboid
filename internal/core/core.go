@@ -90,11 +90,12 @@ type Core struct {
 	mainReq    chan string
 	StartedAt  time.Time
 
-	lastReload atomic.Pointer[ReloadReport]
-	lastDrill  atomic.Pointer[DrillReport]
-	lastFlood  atomic.Pointer[FloodReport]
-	batchMu    sync.Mutex
-	batch      BatchStatus
+	lastAutoRebuild atomic.Int64
+	lastReload      atomic.Pointer[ReloadReport]
+	lastDrill       atomic.Pointer[DrillReport]
+	lastFlood       atomic.Pointer[FloodReport]
+	batchMu         sync.Mutex
+	batch           BatchStatus
 }
 
 // State is what the layer is doing now.
@@ -213,7 +214,8 @@ func New(ctx context.Context, opt Options) (*Core, error) {
 	c.Rec = monitor.NewRecorder(15 * time.Minute)
 	c.Alarms = monitor.NewAlarms()
 	c.Rebuild = &monitor.Progress{}
-	c.flusher = &flush.Flusher{Store: st, Specs: specs, Dict: c.Dict, Loc: c.Loc, Now: time.Now, Log: c.Log, Notify: "cuboid_changes"}
+	c.flusher = &flush.Flusher{Store: st, Specs: specs, Dict: c.Dict, Loc: c.Loc, Now: time.Now, Log: c.Log, Notify: "cuboid_changes",
+		Building: func(name string) bool { return !c.isReady(name) }}
 	c.engine = engine.New(cfg, c.Loc, time.Now, c.loadDims)
 	c.Svc = &query.Service{
 		Store: st, Dict: c.Dict, Loc: c.Loc, Now: time.Now,
@@ -225,6 +227,14 @@ func New(ctx context.Context, opt Options) (*Core, error) {
 	c.Hub = query.NewHub(c.Svc, lim.SSEPerTenant)
 	c.Verify = &verify.Verifier{Main: c.Main, Emitter: c.Emitter, Pipeline: c.Pipeline, Svc: c.Svc, Store: st, Loc: c.Loc,
 		Limit: rate.NewLimiter(rate.Limit(float64(lim.VerifyPerMinute)/60), 10)}
+	c.Verify.OnMismatch = func(detail string) {
+		c.Audit.Event(audit.Event{Kind: "verification_mismatch", Severity: "P1", Detail: detail})
+		c.Alarms.Raise("verification_mismatch", "A check against the main database did not match: "+detail)
+		// Bonus B-2: a failed check triggers a rebuild, at most once in ten minutes.
+		if last := c.lastAutoRebuild.Load(); time.Now().Unix()-last > 600 && c.lastAutoRebuild.CompareAndSwap(last, time.Now().Unix()) {
+			c.RebuildFromMain("a check against the main database failed")
+		}
+	}
 	c.Sampler = &verify.Sampler{V: c.Verify, Members: c.Members, Every: 3 * time.Second}
 	c.API = &query.API{Svc: c.Svc, Keys: c.Keys, Members: c.Members, Verify: c.Verify.HTTP, Hub: c.Hub}
 	return c, nil
@@ -370,6 +380,7 @@ func (c *Core) Run(ctx context.Context) error {
 	go c.background(ctx)
 	go c.Rec.Run(ctx, c.sample)
 	go c.Sampler.Run(ctx)
+	go c.finishInterruptedBuilds(ctx)
 	return c.streamLoop(ctx)
 }
 
@@ -433,6 +444,33 @@ func (c *Core) streamLoop(ctx context.Context) error {
 		backoff = time.Second
 	}
 	return nil
+}
+
+// finishInterruptedBuilds builds rollups a crash left unbuilt: a reload that
+// died mid-build leaves them in the config, not ready, and not served.
+func (c *Core) finishInterruptedBuilds(ctx context.Context) {
+	for ctx.Err() == nil {
+		if c.Pipeline() != nil && c.State() == "streaming" {
+			var pending []*config.Rollup
+			for _, r := range c.Config().Rollups.Values() {
+				if !c.isReady(r.Name) {
+					pending = append(pending, r)
+				}
+			}
+			if len(pending) == 0 {
+				return
+			}
+			err := c.RebuildFromMirror(ctx, nil, pending, nil, "finishing a build interrupted by a restart")
+			if err == nil {
+				return
+			}
+			c.Log.Warn("finish interrupted build", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 var errStopForRebuild = errors.New("stopped for a rebuild from the main database")

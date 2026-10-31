@@ -105,7 +105,7 @@ func MirrorDDL(t *Table, tenantCol, suffix string) []string {
 		stmts = append(stmts, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s, %s)",
 			QuoteIdent(t.Name()+suffix+"_time"), name, QuoteIdent(tenantCol), QuoteIdent(t.Source.Time)))
 	}
-	return append(stmts, rlsDDL(t.Name()+suffix)...)
+	return withRLS(stmts, t.Name(), suffix)
 }
 
 // CellDDL creates or extends a fact source's rollup cell table.
@@ -125,6 +125,16 @@ func CellDDL(src *config.Source, suffix string) []string {
 		IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = %s) THEN
 			ALTER TABLE %s ADD CONSTRAINT %s CHECK (%s >= 0);
 		END IF; END $$`, quoteLiteral(table+"_count_nonneg"), name, QuoteIdent(table+"_count_nonneg"), QuoteIdent(cm)))
+	return withRLS(stmts, config.CellTable(src.Name), suffix)
+}
+
+// withRLS adds row-level security to a live table. Shadow tables get it in
+// SwapIn instead: COPY FROM is not allowed under forced RLS, and only the
+// writer can reach a shadow until the transaction that swaps it in.
+func withRLS(stmts []string, table, suffix string) []string {
+	if suffix != "" {
+		return stmts
+	}
 	return append(stmts, rlsDDL(table)...)
 }
 
@@ -230,6 +240,7 @@ func SwapIn(ctx context.Context, tx pgx.Tx, live []string, suffix string) error 
 			fmt.Sprintf("ALTER TABLE %s RENAME TO %s", QuoteIdent(sh), QuoteIdent(l)),
 			fmt.Sprintf("DROP TABLE %s", QuoteIdent(l+"__old")),
 		}
+		stmts = append(stmts, rlsDDL(l)...)
 		for _, s := range stmts {
 			if _, err := tx.Exec(ctx, s); err != nil {
 				return fmt.Errorf("swap %s: %w", l, err)

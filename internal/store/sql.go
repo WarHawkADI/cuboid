@@ -207,7 +207,7 @@ func QuerySQL(pl *planner.Plan, enc Encoder, loc *time.Location, n Names) (sql s
 	q, src, r := pl.Query, pl.Source, pl.Rollup
 	cfg := enc.Cfg
 	tz := quoteLiteral(loc.String())
-	args = []any{q.Tenants, r.ID}
+	args = []any{q.Tenants}
 	arg := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
@@ -235,7 +235,7 @@ func QuerySQL(pl *planner.Plan, enc Encoder, loc *time.Location, n Names) (sql s
 		for _, s := range pl.Segments {
 			segs = append(segs, fmt.Sprintf("(grain = %d AND bucket >= %s AND bucket < %s)", s.Grain, arg(s.From), arg(s.To)))
 		}
-		where := []string{"tenant_id = ANY($1)", "rollup = $2", "(" + strings.Join(segs, " OR ") + ")"}
+		where := []string{"tenant_id = ANY($1)", "rollup = " + arg(r.ID), "(" + strings.Join(segs, " OR ") + ")"}
 		for dim, id := range filterIDs {
 			where = append(where, fmt.Sprintf("k%d = %s", pl.FilterPos[dim]+1, arg(id)))
 		}

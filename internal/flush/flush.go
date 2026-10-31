@@ -48,6 +48,9 @@ type Flusher struct {
 	Names  store.Names
 	Log    *slog.Logger
 	Notify string // NOTIFY channel; empty disables
+	// Building reports a rollup whose build from the mirror has not cut over.
+	// Its live cells do not exist yet, so its deltas go only to the delta log.
+	Building func(name string) bool
 }
 
 // Flush writes d at position pos. cfg is the configuration d was built with.
@@ -67,6 +70,9 @@ func (f *Flusher) Flush(ctx context.Context, cfg *config.Config, d *engine.Delta
 	for tenant, tables := range d.DimRebuild {
 		for table := range tables {
 			for _, r := range engine.AffectedRollups(cfg, table) {
+				if f.Building != nil && f.Building(r.Name) {
+					continue // its own build from the mirror will read the new values
+				}
 				if rebuild[tenant] == nil {
 					rebuild[tenant] = map[int16]*config.Rollup{}
 				}
@@ -91,10 +97,19 @@ func (f *Flusher) Flush(ctx context.Context, cfg *config.Config, d *engine.Delta
 		return nil, err
 	}
 	res.MirrorRows = n
-	if err := f.writeCells(ctx, tx, cfg, enc, ids, cells); err != nil {
+	live := cells
+	if f.Building != nil {
+		live = make(map[engine.CellKey][]int64, len(cells))
+		for k, v := range cells {
+			if !f.Building(cfg.RollupByID(k.Rollup).Name) {
+				live[k] = v
+			}
+		}
+	}
+	if err := f.writeCells(ctx, tx, cfg, enc, ids, live); err != nil {
 		return nil, err
 	}
-	res.Cells = len(cells)
+	res.Cells = len(live)
 	res.CellDeltas = cells
 	for tenant, rs := range rebuild {
 		for _, r := range rs {
@@ -333,22 +348,40 @@ func (f *Flusher) writeCells(ctx context.Context, tx pgx.Tx, cfg *config.Config,
 				m[i] = append(m[i], x)
 			}
 		}
-		var mcols, munn, sets, zero []string
+		var mcols, munn, sets, zero, dcols []string
 		args := []any{tenant, rollup, grain, bucket, k[0], k[1], k[2]}
 		for i, meas := range src.Measures.Values() {
 			c := store.QuoteIdent(meas.Name)
 			mcols = append(mcols, c)
+			dcols = append(dcols, "d."+c)
 			munn = append(munn, fmt.Sprintf("$%d::bigint[]", 8+i))
-			sets = append(sets, fmt.Sprintf("%s = c.%s + EXCLUDED.%s", c, c, c))
+			sets = append(sets, fmt.Sprintf("%s = c.%s + d.%s", c, c, c))
 			zero = append(zero, fmt.Sprintf("c.%s = 0", c))
 			args = append(args, m[i])
 		}
 		table := f.Names.Cells(source)
-		sql := fmt.Sprintf(`INSERT INTO %s AS c (tenant_id, rollup, grain, bucket, k1, k2, k3, %s)
-			SELECT * FROM unnest($1::int[], $2::smallint[], $3::smallint[], $4::timestamptz[], $5::bigint[], $6::bigint[], $7::bigint[], %s)
-			ON CONFLICT (tenant_id, rollup, grain, bucket, k1, k2, k3) DO UPDATE SET %s
-			RETURNING tenant_id, rollup, grain, bucket, k1, k2, k3, (%s)`,
-			table, strings.Join(mcols, ", "), strings.Join(munn, ", "), strings.Join(sets, ", "), strings.Join(zero, " AND "))
+		const same = "c.tenant_id = d.tenant_id AND c.rollup = d.rollup AND c.grain = d.grain AND c.bucket = d.bucket AND c.k1 = d.k1 AND c.k2 = d.k2 AND c.k3 = d.k3"
+		// UPDATE then INSERT, not INSERT ... ON CONFLICT: Postgres checks CHECK
+		// constraints on the proposed row before resolving a conflict, so a
+		// retraction (a negative delta) would fail even when the cell exists.
+		// The flusher is the only writer, so there is no insert race. A negative
+		// delta with no cell to retract from still fails loudly on the INSERT.
+		sql := fmt.Sprintf(`WITH d AS (
+				SELECT * FROM unnest($1::int[], $2::smallint[], $3::smallint[], $4::timestamptz[], $5::bigint[], $6::bigint[], $7::bigint[], %s)
+					AS u(tenant_id, rollup, grain, bucket, k1, k2, k3, %s)
+			), up AS (
+				UPDATE %s c SET %s FROM d WHERE %s
+				RETURNING c.tenant_id, c.rollup, c.grain, c.bucket, c.k1, c.k2, c.k3, (%s) AS is_zero
+			), ins AS (
+				INSERT INTO %s (tenant_id, rollup, grain, bucket, k1, k2, k3, %s)
+				SELECT d.tenant_id, d.rollup, d.grain, d.bucket, d.k1, d.k2, d.k3, %s FROM d
+				WHERE NOT EXISTS (SELECT 1 FROM %s c WHERE %s)
+				RETURNING 1
+			)
+			SELECT * FROM up`,
+			strings.Join(munn, ", "), strings.Join(mcols, ", "),
+			table, strings.Join(sets, ", "), same, strings.Join(zero, " AND "),
+			table, strings.Join(mcols, ", "), strings.Join(dcols, ", "), table, same)
 		rows, err := tx.Query(ctx, sql, args...)
 		if err != nil {
 			return fmt.Errorf("upsert %s cells: %w", source, err)

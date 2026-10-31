@@ -35,8 +35,8 @@ type Config struct {
 }
 
 // Defaults are used for any value the file leaves out.
-var Defaults = Config{HeavyCost: 20000, HeavyPerTenant: 2, LightPerTenant: 32, GlobalConcurrency: 16, WaitMS: 200,
-	KeyRate: 50, KeyBurst: 100, MaxEdgeRows: 400000, CacheEntries: 512, VerifyPerMinute: 120, SSEPerTenant: 50}
+var Defaults = Config{HeavyCost: 20000, HeavyPerTenant: 2, LightPerTenant: 8, GlobalConcurrency: 16, WaitMS: 200,
+	KeyRate: 500, KeyBurst: 1000, MaxEdgeRows: 400000, CacheEntries: 512, VerifyPerMinute: 120, SSEPerTenant: 50}
 
 // LoadConfig reads limits.yaml.
 func LoadConfig(path string) (Config, error) {
@@ -83,6 +83,7 @@ type Limiter struct {
 	mu      sync.Mutex
 	tenants map[string]*tenant
 	keys    map[string]*rate.Limiter
+	exempt  map[string]bool
 	Rate429 atomic.Int64
 }
 
@@ -108,6 +109,10 @@ func (l *Limiter) tenant(p string) *tenant {
 // AllowKey applies the per-key token bucket.
 func (l *Limiter) AllowKey(prefix string) bool {
 	l.mu.Lock()
+	if l.exempt[prefix] {
+		l.mu.Unlock()
+		return true
+	}
 	r := l.keys[prefix]
 	if r == nil {
 		r = rate.NewLimiter(rate.Limit(l.cfg.KeyRate), l.cfg.KeyBurst)
@@ -119,6 +124,17 @@ func (l *Limiter) AllowKey(prefix string) bool {
 		return false
 	}
 	return true
+}
+
+// Exempt lifts the per-key rate for a key while a drill or flood runs: those
+// exercise the limits behind it, which the rate limit would otherwise hide.
+func (l *Limiter) Exempt(prefix string, on bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.exempt == nil {
+		l.exempt = map[string]bool{}
+	}
+	l.exempt[prefix] = on
 }
 
 // Acquire takes a slot for a query of partition p. It waits up to WaitMS.

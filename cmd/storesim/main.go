@@ -236,7 +236,10 @@ func (s *sim) run(ctx context.Context, writes bool) {
 func (s *sim) observe(d time.Duration, write bool, err error) {
 	s.ops.Add(1)
 	if err != nil {
-		s.errs.Add(1)
+		// The app's error rate is part of the measurement: never let it pass quietly.
+		if s.errs.Add(1)%500 == 1 {
+			s.log.Error("store app operation failed", "write", write, "err", err)
+		}
 		return
 	}
 	s.mu.Lock()
@@ -395,8 +398,10 @@ func (s *sim) placeOrder(ctx context.Context, t *tenant, in orderInput) (*orderO
 	}
 	for attempt := 0; attempt < 5; attempt++ {
 		o.OrderID = t.nextOrder.Add(1)
+		// No row back means the id was taken or the product does not exist.
 		err := s.pool.QueryRow(ctx, `INSERT INTO orders (tenant_id, order_id, customer_id, product_id, quantity, amount_paise, status, payment_method, channel, created_at, updated_at)
-			SELECT $1, $2, $3, $4, $5, p.price_paise * $5, $6, $7, $8, $9, $9 FROM products p WHERE p.tenant_id = $1 AND p.product_id = $4
+			SELECT $1::int, $2::bigint, $3::bigint, $4::bigint, $5::int, p.price_paise * $5::int, $6::text, $7::text, $8::text, $9::timestamptz, $9::timestamptz
+			FROM products p WHERE p.tenant_id = $1::int AND p.product_id = $4::bigint
 			ON CONFLICT DO NOTHING RETURNING amount_paise`,
 			t.id, o.OrderID, o.CustomerID, o.ProductID, o.Quantity, o.Status, pay, ch, o.CreatedAt).Scan(&o.AmountPaise)
 		if errors.Is(err, pgx.ErrNoRows) {
