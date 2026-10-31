@@ -2,9 +2,9 @@
 
 The hardest questions we expect, each with a short answer and where to show it.
 
-1. **Did you meet every target?** No. Freshness and correctness are Great. Query speed and database safety are Good. Growth is not met, because of one query, top customers, which also keeps query speed from Great. *Show: Results page.*
+1. **Did you meet every target?** Yes, at Good or better. Freshness, correctness and query speed are Great. Database safety and growth are Good. *Show: Results page.*
 
-2. **Why is top customers slow?** Its cost grows with the customers in the range, about 130,000 on the largest store, and rollups cannot shrink that. Viewers get it from cache in milliseconds, and the direct query was slower than ours in our checks. *Show: Results page, drawer on a top-N number.*
+2. **Why does top customers grow the most?** It used to read every customer in the range, about 130,000 on the largest store, and grew 13.7x. It now walks each month's largest customer totals and stops once no one else can make the list, so it reads a few hundred customers: 3.7x, and still exact. *Show: ADR-011, and `top_bound` in the plan of a top-customers answer.*
 
 3. **Does the dashboard load slow the app?** Direct: app p95 goes to 104 ms. Through Cuboid: 0.99 to 1.16 ms, +17.5%, and +28.4% against Cuboid stopped, because everything shares one laptop's cores and disk. No dashboard query reaches the main database. *Show: recorder.*
 

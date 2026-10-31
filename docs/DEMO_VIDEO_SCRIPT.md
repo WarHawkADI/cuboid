@@ -48,7 +48,7 @@ About 2 minutes 40 seconds, roughly 370 words. One voice, calm and unhurried: th
 ### 8. What we measured
 *On screen: the targets table, then the Results page.*
 
-> Here's what we measured. Freshness and correctness hit Great. Speed and database safety hit Good. And one query, top customers, misses the growth target, at nearly fourteen times. We show you that, because every number here comes from a file you can check.
+> Here's what we measured. Freshness, correctness and speed hit Great. Database safety and growth hit Good. Top customers grows the most, under four times from one million to ten million orders, down from nearly fourteen. We show you that, because every number here comes from a file you can check.
 
 ### 9. Close
 *On screen: the deck's cover.*

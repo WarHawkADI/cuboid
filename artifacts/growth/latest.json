@@ -81,16 +81,16 @@
     },
     {
       "query": "FR-3 top 10 customers, last 30 days",
-      "uncached_p50_ratio": 1.1846612062546538,
-      "uncached_p99_ratio": 12.635958660014257,
-      "cached_p50_ratio": 0,
-      "cached_p99_ratio": 1.2247191011235954,
-      "small_uncached_p99_ms": 16.836,
-      "main_uncached_p99_ms": 212.739,
-      "absolute_difference_p99_ms": 195.90300000000002,
-      "largest_store_small_p99_ms": 16.836,
-      "largest_store_main_p99_ms": 229.978,
-      "largest_store_ratio": 13.659895462105014
+      "uncached_p50_ratio": 0.8968677494199536,
+      "uncached_p99_ratio": 2.9928346408054853,
+      "cached_p50_ratio": 0.9675925925925926,
+      "cached_p99_ratio": 1.1478873239436622,
+      "small_uncached_p99_ms": 16.189,
+      "main_uncached_p99_ms": 48.451,
+      "absolute_difference_p99_ms": 32.262,
+      "largest_store_small_p99_ms": 16.189,
+      "largest_store_main_p99_ms": 59.256,
+      "largest_store_ratio": 3.6602631416393847
     },
     {
       "query": "FR-1 count, arbitrary timestamps",
@@ -106,7 +106,7 @@
       "largest_store_ratio": 1.1967994552264216
     }
   ],
-  "worst_uncached_p99_ratio": 13.659895462105014,
+  "worst_uncached_p99_ratio": 3.6602631416393847,
   "worst_query": "FR-3 top 10 customers, last 30 days",
-  "note": "Ratios of values under 10 ms are mostly noise; the absolute difference is published beside each ratio."
+  "note": "Ratios of values under 10 ms are mostly noise; the absolute difference is published beside each ratio. Top customers was re-measured on 31 October 2026 with the rank rollup (ADR-011), at both tiers on one 16-CPU Linux machine; the other rows are from the earlier build, on the 12-CPU laptop."
 }

@@ -38,11 +38,11 @@ Three ideas carry the design:
 
 | PRD target | Good | Great | Measured | Verdict |
 |---|---|---|---|---|
-| Query speed | Under 1 s | Under 200 ms | 1,000 dashboards: p99 3 ms, 0 errors. PRD examples: under 39 ms uncached on the largest store. Top customers: 230 ms | **Good** |
+| Query speed | Under 1 s | Under 200 ms | 1,000 dashboards: p99 3 ms, 0 errors. PRD examples: under 39 ms uncached on the largest store. Top customers: 59 ms | **Great** |
 | Freshness | Under 5 min | Under 30 s | p99 1.1 s | **Great** |
 | Database safety | Under 25% | Under 10% | App p95 0.99 to 1.16 ms, +17.5%. Against Cuboid stopped, +28.4%. Direct: 104 ms | **Good** |
 | Correctness | Most queries | All queries | 2,500 of 2,500 exact, 500 during writes | **Great** |
-| Growth, 1M to 10M | Under 5x | Under 2x | 1.2x to 3.2x on the PRD's examples. Top customers: 13.7x | **Not met** |
+| Growth, 1M to 10M | Under 5x | Under 2x | 1.2x to 3.2x on the PRD's examples. Top customers: 3.7x | **Good** |
 
 | Attack or failure | Result, at 10M orders |
 |---|---|
@@ -52,7 +52,7 @@ Three ideas carry the design:
 | 30 red-team checks: bad keys, injection, row security, recategorising, order moves | 30 of 30 pass |
 | 23 acceptance checks: the PRD's examples, both rebuilds, flood, live metric, drills | 23 of 23 pass |
 
-**The weak row.** Top customers has about 130,000 groups on the largest store, and rollups cannot shrink that. Viewers read it from cache in under 2 ms; only the uncached query is slow. The planned fix touches the exactly-once path, so we chose not to rush it.
+**The slowest row.** Top customers had about 130,000 groups on the largest store and grew 13.7x. It now walks each month's largest customer totals and stops once no one else can make the list, reading a few hundred customers, and every list is still checked against the full result ([ADR-011](docs/adr/ADR-011-exact-top-n.md)). At 3.7x, re-measured at both tiers on a 16-CPU machine, it is Good, not Great.
 
 <p align="center"><img src="docs/img/growth.svg" alt="Growth from 1M to 10M orders on the largest store" width="90%"></p>
 

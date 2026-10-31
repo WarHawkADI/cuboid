@@ -29,11 +29,11 @@ Running totals for preset windows change the exactly-once flush path, the riskie
 
 `internal/query/rank_test.go` compares the walk with ranking every key on random data, with a random split of each month, ties and several stores. `TestSplitRangeTilesTheRange` checks that the split covers each range exactly once. The fenced check compares each pushed-down list with the full result of the same snapshot, and that result with the main database: 150 of 150 exact at 1M, over every store, company scopes, all three measures, n from 1 to 100, every preset and random timestamps.
 
-Measured on 1 November 2026, top 10 customers by orders over `last_30d`, each tier benchmarked fresh after its seed:
+Measured on 31 October 2026 with `bench speed`, top 10 customers by orders over `last_30d`, at both tiers on one 16-CPU Linux machine:
 
-| | 1M | 10M | Ratio |
-|---|---:|---:|---:|
-| Largest store, p50 of 5 | 13.1 ms | 29.5 ms | 2.3x |
-| All stores, p99 | 16.2 ms | 36.7 ms | 2.3x |
+| | 1M | 10M | Ratio | Before |
+|---|---:|---:|---:|---:|
+| Largest store, slowest of 5 | 16.2 ms | 59.3 ms | 3.66x | 13.66x |
+| All stores, p99 | 16.2 ms | 48.5 ms | 2.99x | 12.64x |
 
-On the same 10M data, the full query this replaces took about 115 ms in SQL alone, before its total for shares. The largest store's slowest of 5 samples at 10M was 154 ms, the first touch after a rebuild; top products, unchanged, showed the same (13 ms p50, 222 ms slowest). `artifacts/growth/latest.json` has not been regenerated from these runs.
+These are the rows in `artifacts/speed/` and `artifacts/growth/latest.json`; the other rows there are from the earlier build. A second 10M run, started straight after a rebuild, gave the same median growth (13.1 to 29.5 ms, 2.3x) but one first-touch sample of 154 ms; top products, unchanged, showed the same (13 ms median, 222 ms slowest). On the same 10M data, the full query this replaces took about 115 ms in SQL alone, before its total for shares.

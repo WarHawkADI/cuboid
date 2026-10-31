@@ -85,7 +85,7 @@ func writeReport() {
 
 	b.WriteString(`## Limits of these numbers
 - One laptop, one run of each test. Treat small differences as noise.
-- Top customers' cost grows with the customers in the range, which rollups cannot shrink. It is the slowest query and the worst growth ratio.
+- Top customers ranks a few hundred customers through month totals instead of every one in the range (ADR-011). It is still the slowest query and the worst growth ratio.
 - Isolation and chaos totals are on the Results page and in ` + "`artifacts/`" + `, with the tier each ran at.
 - ` + "`REPLICA IDENTITY FULL`" + `'s extra WAL has not been measured.
 `)

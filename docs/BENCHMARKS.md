@@ -20,7 +20,7 @@ Measured 31 October 2026 18:09 on 12 logical CPUs, 100 stores. 1000 viewers: p50
 | FR-3 top 10 products, this week | 2.9 ms | 25.8 ms | 38.6 ms | 0.9 ms |
 | FR-4 by status, last 7 days | 1.7 ms | 6.3 ms | 6.9 ms | 1.4 ms |
 | FR-4 by category, last 30 days | 2.9 ms | 15.7 ms | 23.8 ms | 1.5 ms |
-| FR-3 top 10 customers, last 30 days | 6.4 ms | 212.7 ms | 230.0 ms | 1.3 ms |
+| FR-3 top 10 customers, last 30 days | 7.7 ms | 48.5 ms | 59.3 ms | 0.3 ms |
 | FR-1 count, arbitrary timestamps | 1.6 ms | 3.8 ms | 3.5 ms | 1.5 ms |
 
 ```mermaid
@@ -28,7 +28,7 @@ xychart-beta
   title "Uncached p99 by query, main tier (ms)"
   x-axis ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"]
   y-axis "ms"
-  bar [5.8, 4.8, 6.3, 25.8, 6.3, 15.7, 212.7, 3.8]
+  bar [5.8, 4.8, 6.3, 25.8, 6.3, 15.7, 48.5, 3.8]
 ```
 Q1 to Q8 follow the table's order.
 
@@ -59,15 +59,15 @@ Random queries on random stores, each compared with direct SQL on the main datab
 | FR-3 top 10 products, this week | 12.0 ms | 25.8 ms | 2.14x | 12.0 ms | 38.6 ms | 3.21x |
 | FR-4 by status, last 7 days | 4.1 ms | 6.3 ms | 1.55x | 4.0 ms | 6.9 ms | 1.74x |
 | FR-4 by category, last 30 days | 99.5 ms | 15.7 ms | 0.16x | 7.8 ms | 23.8 ms | 3.04x |
-| FR-3 top 10 customers, last 30 days | 16.8 ms | 212.7 ms | 12.64x | 16.8 ms | 230.0 ms | 13.66x |
+| FR-3 top 10 customers, last 30 days | 16.2 ms | 48.5 ms | 2.99x | 16.2 ms | 59.3 ms | 3.66x |
 | FR-1 count, arbitrary timestamps | 3.9 ms | 3.8 ms | 0.95x | 2.9 ms | 3.5 ms | 1.20x |
 
-Ratios of values under 10 ms are mostly noise; the absolute difference is published beside each ratio.
+Ratios of values under 10 ms are mostly noise; the absolute difference is published beside each ratio. Top customers was re-measured on 31 October 2026 with the rank rollup (ADR-011), at both tiers on one 16-CPU Linux machine; the other rows are from the earlier build, on the 12-CPU laptop.
 
 ## Limits of these numbers
 - One laptop, one run of each test. Treat small differences as noise.
-- Top customers' cost grows with the customers in the range, which rollups cannot shrink. It is the slowest query and the worst growth ratio.
+- Top customers ranks a few hundred customers through month totals instead of every one in the range (ADR-011). It is still the slowest query and the worst growth ratio.
 - Isolation and chaos totals are on the Results page and in `artifacts/`, with the tier each ran at.
 - `REPLICA IDENTITY FULL`'s extra WAL has not been measured.
 
-Generated 31 October 2026 19:56.
+Generated 31 October 2026 20:51.

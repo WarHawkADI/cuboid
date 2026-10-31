@@ -45,7 +45,7 @@ One button drives this through the real APIs, at 10M orders. The [narrated demo 
 | **Every number is provable** | Press "Check against main database" on any figure. It compares at an exact WAL position, while writes run. This check found a real bug that unit tests could not |
 | **Tested by breaking it** | Three drills inject INC-02's failure modes into Cuboid's own code: 0 leaked. 1,000,000 randomized requests with cancellations: 0 crossed stores. 20 `kill -9`s under writes: 500 of 500 checks exact |
 | **New metrics are config** | One line of YAML build a new breakdown from the mirror, live in about a minute at 10M, with no restart and no load on the main database |
-| **Honest about its limits** | One query misses its targets, and [the scorecard](#the-targets-scorecard) says so. [The final report](docs/FINAL_REPORT.md) lists what was left out |
+| **Honest about its limits** | Every target is met, and [the scorecard](#the-targets-scorecard) says which are only Good. [The final report](docs/FINAL_REPORT.md) lists what was left out |
 
 Built for Mitigata CyberForge, Problem 02, by team iiitdards: Aditya Rai and Bhuvan Raju. The submission summary is in [HACKATHON.md](HACKATHON.md).
 
@@ -180,17 +180,17 @@ Measured at 10M orders and 100 stores, with every service sharing one laptop (12
 
 | What we measure | Good | Great | Measured | Verdict |
 |---|---|---|---|---|
-| Query speed | Under 1 s | Under 200 ms | With 1,000 dashboards: p99 3 ms, 0 errors. PRD examples under 39 ms uncached on the largest store. Top customers over 30 days: 230 ms uncached | **Good**; PRD examples are under Great |
+| Query speed | Under 1 s | Under 200 ms | With 1,000 dashboards: p99 3 ms, 0 errors. PRD examples under 39 ms uncached on the largest store. Top customers over 30 days: 59 ms uncached | **Great** |
 | Freshness | Under 5 min | Under 30 s | p99 1.1 s, inserts and updates | **Great** |
 | Database safety | Under 25% slower | Under 10% slower | App p95 0.99 to 1.16 ms with 1,000 dashboards, +17.5%. Against Cuboid stopped (0.91 ms), +28.4%. Direct: 104 ms | **Good** |
 | Correctness | Most queries | All queries | 2,500 of 2,500 exact, 500 of them during writes | **Great** |
-| Growth | Under 5x | Under 2x | Largest store: 1.2x to 3.2x for PRD examples. Top customers: 13.7x | **Not met** on top customers |
+| Growth | Under 5x | Under 2x | Largest store: 1.2x to 3.2x for PRD examples. Top customers: 3.7x | **Good** |
 
-<p align="center"><img src="docs/img/growth.svg" alt="Growth from 1M to 10M orders on the largest store: 1.2x to 3.2x on most queries, 13.7x on top customers" width="90%"></p>
+<p align="center"><img src="docs/img/growth.svg" alt="Growth from 1M to 10M orders on the largest store: 1.2x to 3.2x on most queries, 3.7x on top customers" width="90%"></p>
 
 The two weak spots, plainly:
 
-- **Top customers.** Its cost grows with the number of customers in the range, which rollups cannot shrink. Viewers read it from cache in under 2 ms; the uncached query is the limit.
+- **Top customers.** It used to read every customer in the range and grew 13.7x. It now walks each month's largest customer totals and stops once no one else can make the list ([ADR-011](docs/adr/ADR-011-exact-top-n.md)), so it reads a few hundred customers and stays exact. At 3.7x it is still the slowest-growing query: Good, not Great. It was re-measured at both tiers on a 16-CPU machine.
 - **Moving ranges under load.** Under heavy dashboard load, a preset such as `last_7d` refreshes about every 5 seconds, so viewers do not queue behind recomputation. Every answer states its true age. Fixed ranges see new orders in about a second.
 
 Also measured at 10M: 1,000,000 randomized requests with 0 crossing stores, and 20 `kill -9`s under writes, back within 3.1 s with 500 of 500 checks exact. Method and raw numbers: `docs/BENCHMARKS.md`. The "Run now" button on `/monitor` re-measures speed, freshness and correctness in about a minute.

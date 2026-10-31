@@ -16,11 +16,11 @@ Measured on one laptop on 31 October 2026. Every service shares its 12 logical C
 | B-3 | Done: the flooding store limited over 3,500 times, others' p99 under 3 ms | D13 on the main tier |
 | B-4 | Done: 45 to 54 s to build at 10M | D14 on the main tier |
 | B-5 | Done | `/monitor` |
-| T1 Speed | **Good.** 1,000 dashboards p99 3 ms, 0 errors. PRD examples under 39 ms on the largest store. Top customers 230 ms | `artifacts/speed/main.json` |
+| T1 Speed | **Great.** 1,000 dashboards p99 3 ms, 0 errors. PRD examples under 39 ms on the largest store. Top customers 59 ms | `artifacts/speed/main.json` |
 | T2 Freshness | **Great.** p99 1.1 s | `artifacts/freshness/main.json` |
 | T3 Safety | **Good.** App p95 0.99 to 1.16 ms with 1,000 dashboards, +17.5%. Against Cuboid stopped (0.91 ms), +28.4%. Direct: 104 ms | `artifacts/safety/main.json` |
 | T4 Correctness | **Great.** 2,500 of 2,500, 500 during writes | `artifacts/correctness/main.json` |
-| T5 Growth | **Not met** on top customers (13.7x). Other queries 1.2x to 3.2x on the largest store | `artifacts/growth/latest.json` |
+| T5 Growth | **Good.** Top customers 3.7x, down from 13.7x with month totals (ADR-011). Other queries 1.2x to 3.2x on the largest store | `artifacts/growth/latest.json` |
 | Runs from the README with Docker | **Not tested** | Docker Desktop is broken on this machine |
 | Crash recovery | 20 `kill -9`s under writes: back within 3.1 s, 500 of 500 checks exact | `artifacts/chaos/main.json` |
 
@@ -36,9 +36,9 @@ The data, the store app's traffic and the dashboards' traffic. Replication, roll
 ## Known risks, most serious first
 1. **The Docker quick start has never run.** Judges may start there. Repair Docker Desktop (it crashes on a missing registry key, `SOFTWARE\Docker Inc.\Docker Desktop`), then run `make docker-clean-clone-check`. Until then, present from this laptop.
 2. **The organisers' script has not arrived.** When it does, follow `provided/README.md` and re-measure. If it targets MongoDB, no adapter exists.
-3. **Top customers** misses T1's Great line and T5. The specification's fix, running totals for preset windows, was not built: it touches the exactly-once flush path, and late changes there risk the correctness that is the project's strongest claim.
+3. **Top customers** is Good, not Great, on T5: 3.7x. It now ranks through each customer's month totals and reads a few hundred customers (ADR-011), without touching the exactly-once flush path. A list with a filter, or over more than three months, still ranks every customer, as before.
 4. **Moving ranges lag under load.** Under heavy dashboard load a preset such as `last_7d` refreshes about every 5 seconds, and at most every second otherwise. Answers are served with their true age and stay exact as of that age. Fixed ranges are not throttled.
-5. **Mixed builds.** The 1M figures behind the growth ratios come from an earlier build. Correctness, freshness, the 1,000,000-request run and the 20 kills were measured before the final refresh fix, which changed when answers are refreshed, not how they are computed. D1 to D17 ran after that fix, before the reload fix.
+5. **Mixed builds.** The 1M figures behind the growth ratios come from an earlier build. Top customers' speed and growth rows were re-measured on 31 October 2026 with the rank rollup, at both tiers, on a 16-CPU Linux machine; every other row is from the 12-CPU laptop. Correctness, freshness, the 1,000,000-request run and the 20 kills were measured before the final refresh fix, which changed when answers are refreshed, not how they are computed. D1 to D17 ran after that fix, before the reload fix.
 6. **Memory.** The laptop ran out once and took down the main database and the store app. Cuboid recovered with no data difference. The trigger was never found. Close other applications before presenting.
 
 ## Left out of the specification

@@ -28,7 +28,7 @@ Beat 9 waits for the YAML rollup to finish building, about a minute at 10M, so t
 
 ## Do not claim
 - That the app stays under the 10% line with 1,000 dashboards. It measured +17.5%, Good rather than Great, and +28.4% against Cuboid stopped.
-- That Growth is met. Top customers is 13.7x on the largest store.
+- That Growth is Great. Top customers is 3.7x on the largest store: Good.
 - That the Docker path has been tested, until someone has run it.
 - 1,000-tenant scale. It has been tested at 100.
 
