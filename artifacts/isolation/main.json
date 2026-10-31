@@ -1,0 +1,13 @@
+{
+  "client_cancelled": 57153,
+  "cross_tenant": 0,
+  "different": 0,
+  "exact": 942847,
+  "generated_at": "2026-10-31T17:43:25.7986287+05:30",
+  "identical_404": true,
+  "limited": 0,
+  "other_status": 0,
+  "requests": 1000000,
+  "seconds": 154.2040157,
+  "tier": "main"
+}

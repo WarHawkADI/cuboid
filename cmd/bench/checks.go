@@ -216,7 +216,22 @@ func runDemoCheck(ctx context.Context, w *world) bool {
 			}
 			time.Sleep(200 * time.Millisecond)
 		}
+		// A rebuild from main paused the stream: the fence cannot pass until the
+		// stream has caught up on what was written meanwhile.
+		for end := time.Now().Add(10 * time.Minute); time.Now().Before(end); time.Sleep(time.Second) {
+			var fr struct {
+				Freshness struct {
+					LagMS int64 `json:"lag_ms"`
+				} `json:"freshness"`
+			}
+			if getJSON(cuboidURL+"/api/monitor/state?since=9999999999999", "", &fr) == nil && fr.Freshness.LagMS >= 0 && fr.Freshness.LagMS < 3000 {
+				break
+			}
+		}
 		ok, det, err := w.check(s(big), "orders/breakdown", map[string]string{"by": "category", "range": "last_90d"})
+		if err != nil {
+			det = err.Error()
+		}
 		add("D12", "Rebuild from "+source+" while queries answer", code == 202 && failed == 0 && err == nil && ok, fmt.Sprintf("%d answered, %d failed during it; afterwards %s", answered, failed, det))
 	}
 	rebuild("mirror")
@@ -253,6 +268,10 @@ func runDemoCheck(ctx context.Context, w *world) bool {
 		Recorder struct {
 			Points []any `json:"points"`
 		} `json:"recorder"`
+	}
+	// The page reports the last minute, and a rebuild can leave that empty of queries.
+	if resp, err := client.Do(newGet(fmt.Sprintf("%s/tenants/%d/orders/count?range=last_7d", cuboidURL, big.ID), big.Key)); err == nil {
+		drain(resp)
 	}
 	merr := getJSON(cuboidURL+"/api/monitor/state", "", &mon)
 	add("D15", "Monitoring state: query time, data lag, recorder", merr == nil && len(mon.Latency) > 0 && len(mon.Recorder.Points) > 0, fmt.Sprintf("lag %d ms, %d endpoints, %d points (the browser check is separate)", mon.Freshness.LagMS, len(mon.Latency), len(mon.Recorder.Points)))

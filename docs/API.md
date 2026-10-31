@@ -30,7 +30,7 @@ Everything under `/tenants/{id}` also works under `/companies/{id}`.
 
 The same shape serves SOC alerts through config: `/tenants/{id}/soc_alerts/count`, `/tenants/{id}/tactics/top`.
 
-Operator routes need the operator key: `/admin/rebuild`, `/admin/config/reload`, `/admin/drill`, `/admin/flood`, `/admin/path`, `/admin/scenario`, `/admin/chaos`, `/admin/verify-batch`.
+Operator routes need the operator key: `/admin/rebuild`, `/admin/config/reload`, `/admin/drill`, `/admin/flood`, `/admin/path`, `/admin/scenario`, `/admin/chaos`, `/admin/verify-batch`, `/admin/targets/run`.
 
 Open routes: `/monitor` (the page), `/api/monitor/state`, `/api/scorecard`, `/metrics`, `/healthz`. The monitoring state shows operational numbers and store ids, not store data. `/api/demo/keys` exists only with `CUBOID_DEMO_MODE=true`.
 

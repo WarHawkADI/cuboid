@@ -5,7 +5,6 @@
     "cpus": "12",
     "deployment": "every service on one machine",
     "go": "go1.26.0",
-    "host": "AdityaRai-Victus",
     "os": "windows",
     "postgres": "16"
   },

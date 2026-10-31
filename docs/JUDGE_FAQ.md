@@ -21,7 +21,7 @@ Yes. It found a real bug that lost orders: a commit written straight after a hea
 More WAL on updates and deletes, since each carries the old row. Inserts are unaffected. We have not measured the cost yet. The alternative is reading old rows from the mirror (ADR-003).
 
 **What happens if Cuboid is down for an hour?**
-Dashboards stop being served, because Cuboid serves them. The app is unaffected. The slot holds WAL meanwhile, with an alarm at 1 GB and a 4 GB cap that protects the main database's disk. On restart it resumes from its committed position and catches up. If the cap is passed, the slot is lost, and Cuboid rebuilds from a snapshot. A one-hour outage has not been run; shorter stops and kills have.
+Dashboards stop being served, because Cuboid serves them. The app is unaffected. The slot holds WAL meanwhile, with an alarm at 1 GB and a 4 GB cap that protects the main database's disk. On restart it resumes from its committed position and catches up. If the cap is passed, the slot is lost, and Cuboid rebuilds from a snapshot. A one-hour outage has not been run; shorter stops and 20 kills at 10M have.
 
 **What does a restart cost the app?**
 While Cuboid catches up, the app is measurably slower on one machine, because both databases share a disk. We saw app p95 rise well above baseline just after a restart, then fall as it settled. Separate machines would remove most of that overlap. We have not tested that.

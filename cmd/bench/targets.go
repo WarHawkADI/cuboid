@@ -306,12 +306,13 @@ func settle() {
 
 func runSafety(w *world, phase time.Duration, viewers int) {
 	art := safetyArtifact{Tier: w.tier, GeneratedAt: time.Now(), Environment: environment(),
-		Note: "Same data, same app workload, same machine; databases, Cuboid, the app and the load generator share the machine's cores."}
+		Note: "Same data, same app workload, same machine; databases, Cuboid, the app and the load generator share the machine's cores. Compare p95: the app's p50 sits near this machine's clock tick of about 0.5 ms."}
 	postJSON(loadgenURL+"/control", "", map[string]any{"mode": "off"}, nil)
 	fmt.Println("Stopping Cuboid for the app-alone baseline:", stopCmd)
 	if err := shell(stopCmd); err != nil {
 		fatal(err)
 	}
+	time.Sleep(90 * time.Second) // let earlier load's checkpoints and caches settle: a polluted baseline flatters everything after it
 	alone := measurePhase("App alone (no Cuboid, no dashboards)", phase, 0)
 	if err := shell(startCmd); err != nil {
 		fatal(err)
@@ -328,8 +329,10 @@ func runSafety(w *world, phase time.Duration, viewers int) {
 	phases = append(phases, measurePhase(fmt.Sprintf("Direct, %d dashboards", viewers), phase, viewers))
 	postJSON(loadgenURL+"/control", "", map[string]any{"mode": "off"}, nil)
 	for i := range phases {
-		if alone.P95 > 0 && alone.P50 > 0 {
+		if alone.P95 > 0 {
 			phases[i].SlowerP95 = 100 * (phases[i].P95 - alone.P95) / alone.P95
+		}
+		if alone.P50 > 0 { // can round to 0 at this machine's clock tick
 			phases[i].SlowerP50 = 100 * (phases[i].P50 - alone.P50) / alone.P50
 		}
 	}
@@ -553,9 +556,12 @@ func writeScorecard(w *world) {
 		r := missing("T3", "Database safety", "Normal app query time, with and without dashboard load", "Less than 25% slower", "Less than 10% slower", "make safety-test")
 		var a safetyArtifact
 		if readJSON("safety", tier, &a) == nil && len(a.Phases) >= 3 {
-			c := a.Phases[2]
-			r.Measured = fmt.Sprintf("p95 %+.1f%% (%.2f to %.2f ms) with %d dashboards through Cuboid", c.SlowerP95, a.Phases[0].P95, c.P95, c.Viewers)
-			r.Verdict = verdict(c.SlowerP95, 25, 10)
+			// The PRD's measure: with and without dashboard load. The harder comparison,
+			// against Cuboid not running at all, is stated beside it.
+			without, c := a.Phases[1], a.Phases[2]
+			slower := 100 * (c.P95 - without.P95) / without.P95
+			r.Measured = fmt.Sprintf("App p95 %+.1f%% (%.2f to %.2f ms) with %d dashboards through Cuboid; %+.1f%% against Cuboid stopped (%.2f ms)", slower, without.P95, c.P95, c.Viewers, c.SlowerP95, a.Phases[0].P95)
+			r.Verdict = verdict(slower, 25, 10)
 		}
 		rows = append(rows, r)
 	}

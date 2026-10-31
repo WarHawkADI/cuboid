@@ -107,6 +107,7 @@ func main() {
 	go s.loadTenantsLoop(ctx)
 	go s.run(ctx, false)
 	go s.run(ctx, true)
+	go s.alerts(ctx)
 	srv := &http.Server{Addr: env("STORESIM_LISTEN", ":8081"), Handler: s.routes(), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		log.Info("store app serving", "addr", srv.Addr)
@@ -300,6 +301,45 @@ func (s *sim) read(ctx context.Context, t *tenant) error {
 			return nil
 		}
 		return err
+	}
+}
+
+var (
+	alertSources    = []string{"EDR", "Firewall", "Email gateway", "SIEM correlation", "Cloud posture", "Identity provider", "WAF", "DLP"}
+	alertTactics    = []string{"Initial Access", "Execution", "Persistence", "Privilege Escalation", "Defense Evasion", "Credential Access", "Lateral Movement", "Command and Control", "Exfiltration", "Impact"}
+	alertSeverities = []string{"critical", "high", "high", "medium", "medium", "medium", "low", "low", "low", "info"}
+)
+
+// alerts is the SOC writer (W9): new alerts at a low rate, and some alerts
+// moving to resolved, so the second dataset is live on the same engine.
+func (s *sim) alerts(ctx context.Context) {
+	tick := time.NewTicker(500 * time.Millisecond)
+	defer tick.Stop()
+	for ctx.Err() == nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		if s.paused.Load() || s.loading.Load() {
+			continue
+		}
+		t := s.pick()
+		if t == nil {
+			continue
+		}
+		var err error
+		if rand.IntN(4) == 0 {
+			_, err = s.pool.Exec(ctx, `UPDATE soc_alerts SET status = 'resolved', updated_at = now() WHERE tenant_id = $1 AND alert_id = (
+				SELECT max(alert_id) FROM soc_alerts WHERE tenant_id = $1) AND status = 'new'`, t.id)
+		} else {
+			_, err = s.pool.Exec(ctx, `INSERT INTO soc_alerts (tenant_id, alert_id, severity, source_product, tactic, status, asset_id, risk_score, created_at, updated_at)
+				SELECT $1::int, coalesce(max(alert_id), 0) + 1, $2::text, $3::text, $4::text, 'new', $5::bigint, $6::int, now(), now() FROM soc_alerts WHERE tenant_id = $1`,
+				t.id, alertSeverities[rand.IntN(len(alertSeverities))], alertSources[rand.IntN(len(alertSources))], alertTactics[rand.IntN(len(alertTactics))], 1+rand.Int64N(200), rand.IntN(101))
+		}
+		if err != nil && ctx.Err() == nil {
+			s.log.Warn("alert write", "err", err)
+		}
 	}
 }
 

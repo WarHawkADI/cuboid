@@ -156,8 +156,7 @@ func (w *world) check(scope, endpoint string, params map[string]string) (bool, s
 }
 
 func environment() map[string]string {
-	host, _ := os.Hostname()
-	return map[string]string{"os": runtime.GOOS, "cpus": fmt.Sprint(runtime.NumCPU()), "host": host, "go": runtime.Version(),
+	return map[string]string{"os": runtime.GOOS, "cpus": fmt.Sprint(runtime.NumCPU()), "go": runtime.Version(),
 		"deployment": env("BENCH_DEPLOYMENT", "every service on one machine"), "postgres": "16"}
 }
 
@@ -208,7 +207,7 @@ func waitHealthy(d time.Duration) error {
 
 func main() {
 	if len(os.Args) < 2 {
-		fatal(fmt.Errorf("usage: bench speed|freshness|safety|correctness|growth|targets|demo-check|isolation|chaos|steps"))
+		fatal(fmt.Errorf("usage: bench speed|freshness|safety|correctness|growth|targets|scorecard|report|demo-check|redteam|isolation|chaos|steps|rebuild"))
 	}
 	cmd := os.Args[1]
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
@@ -218,6 +217,10 @@ func main() {
 	viewers := fs.Int("viewers", 1000, "dashboards for the loaded phases")
 	quick := fs.Bool("quick", false, "shorter runs, for the Run now button and development")
 	fs.Parse(os.Args[2:])
+	if cmd == "report" {
+		writeReport()
+		return
+	}
 	w, err := loadWorld()
 	if err != nil {
 		fatal(err)
@@ -258,6 +261,8 @@ func main() {
 		}
 	case "steps":
 		runSteps(w, *phase)
+	case "rebuild":
+		rebuildFromMain(w)
 	case "redteam":
 		if !runRedTeam(ctx, w) {
 			os.Exit(1)

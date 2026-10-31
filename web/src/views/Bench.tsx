@@ -44,6 +44,7 @@ interface Results {
   isolation?: { tier: string; requests: number; cross_tenant: number; identical_404: boolean };
   chaos?: { tier: string; kills: number; all_exact: boolean; recovery_max_ms: number };
   demo_check?: { tier: string; rows: { pass: boolean }[] };
+  safety?: { tier: string; generated_at: string; note: string; phases: { name: string; app_p50_ms: number; app_p95_ms: number; slower_p95_pct: number; viewers: number; dashboard_p99_ms: number }[] };
 }
 
 function Fact({ value, label, tone }: { value: string; label: string; tone?: string }) {
@@ -177,12 +178,48 @@ export function Bench() {
         </div>
       </section>
 
-      <section className="surface stack">
-        <h2>Not measured</h2>
-        <p>
-          Database safety at 10 million orders has no final number. A short test with no dashboards showed the app's query time unchanged by Cuboid once settled. It rose under 1,000 dashboards on this laptop, less than on the direct path.
-        </p>
-      </section>
+      {r.safety ? (
+        <section className="surface stack">
+          <h2>Database safety: the store app's own query time</h2>
+          <div className="scroll-x">
+            <table>
+              <thead>
+                <tr>
+                  <th>Phase</th>
+                  <th className="num">Dashboards</th>
+                  <th className="num">App p50</th>
+                  <th className="num">App p95</th>
+                  <th className="num">Slower than app alone</th>
+                  <th className="num">Dashboard p99</th>
+                </tr>
+              </thead>
+              <tbody>
+                {r.safety.phases.map((p) => (
+                  <tr key={p.name}>
+                    <td>{p.name}</td>
+                    <td className="num">{count(p.viewers)}</td>
+                    <td className="num">{ms(p.app_p50_ms)}</td>
+                    <td className="num">{ms(p.app_p95_ms)}</td>
+                    <td className={`num ${p.slower_p95_pct < 10 ? "great" : p.slower_p95_pct < 25 ? "good" : "bad"}`}>{p.slower_p95_pct.toFixed(1)}%</td>
+                    <td className="num">{p.viewers ? ms(p.dashboard_p99_ms) : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {r.safety.phases.length >= 3 && (
+            <p>
+              The PRD compares with and without dashboard load: {ms(r.safety.phases[1].app_p95_ms)} to {ms(r.safety.phases[2].app_p95_ms)}, {(100 * (r.safety.phases[2].app_p95_ms / r.safety.phases[1].app_p95_ms - 1)).toFixed(0)}% slower with 1,000 dashboards through Cuboid.
+            </p>
+          )}
+          <p className="label small">{r.safety.note}</p>
+        </section>
+      ) : (
+        <section className="surface stack">
+          <h2>Not measured</h2>
+          <p>Database safety has no final number yet. Run make safety-test.</p>
+        </section>
+      )}
     </main>
   );
 }

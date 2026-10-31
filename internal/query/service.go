@@ -66,6 +66,8 @@ type Service struct {
 	// Fresh reports the state of the latest flush, for answers served from cache.
 	Fresh func() store.Freshness
 	sf    singleflight.Group
+	// lastRefresh is when each moving preset's answer last began refreshing.
+	lastRefresh sync.Map
 
 	StaleServed        atomic.Int64
 	CrossTenantBlocked atomic.Int64
@@ -112,11 +114,51 @@ func pushdown(req *Request, plan *planner.Plan) *topLimit {
 	return &topLimit{measure: req.Measure, n: req.N}
 }
 
-// staleServe bounds how old an answer may be served while its refresh runs.
+// staleServe bounds how old an answer for a fixed range may be served while its
+// refresh runs.
 const staleServe = 2 * time.Second
+
+// A moving preset is invalidated by every flush that touches its store. With 100
+// busy stores and a handful of queries each, recomputing each one per flush is
+// hundreds of queries a second: viewers queue behind them and the shared machine
+// slows the app. So a preset refreshes at most once per gap, and the gap widens
+// while the aggregate store is busy. Viewers meanwhile get the last exact answer
+// labelled with its true age, never a wait.
+const (
+	refreshGap     = time.Second
+	refreshBusyGap = 5 * time.Second
+)
+
+// servesStale reports whether this cached answer may be served while it refreshes.
+func servesStale(req *Request, e *cache.Entry) bool {
+	if req.Range != "" {
+		return time.Since(e.Created) < presetMaxAge
+	}
+	return time.Since(e.Created) < staleServe
+}
+
+// refreshDue reports whether a moving preset's refresh may start now.
+func (s *Service) refreshDue(req *Request, partition, key string) bool {
+	if req.Range == "" {
+		return true // fixed ranges are refreshed by data version alone
+	}
+	gap := refreshGap
+	if s.Limits.Busy() {
+		gap = refreshBusyGap
+	}
+	id := partition + "|" + key
+	if last, ok := s.lastRefresh.Load(id); ok && time.Since(last.(time.Time)) < gap {
+		return false
+	}
+	s.lastRefresh.Store(id, time.Now())
+	return true
+}
 
 // refresh recomputes an entry in the background, once per data version.
 func (s *Service) refresh(t Target, req *Request, plan *planner.Plan, key string, cells, edgeRows float64, heavy bool) {
+	if !s.refreshDue(req, t.Partition, key) {
+		return
+	}
 	versions := s.Hist.Snapshot(t.Tenants)
 	flightKey := fmt.Sprintf("%s|%s|%v", t.Partition, key, versions)
 	s.sf.DoChan(flightKey, func() (result any, err error) {
@@ -221,7 +263,7 @@ func (s *Service) Execute(ctx context.Context, t Target, req *Request, opt ExecO
 		// every viewer wait for the same recomputation is what hurts: serve the
 		// answer we have, exact as of when it was computed and labelled so, and
 		// refresh it once in the background.
-		if e, ok := s.Cache.Peek(t.Partition, key); ok && time.Since(e.Created) < staleServe {
+		if e, ok := s.Cache.Peek(t.Partition, key); ok && servesStale(req, e) {
 			r := e.Value.(*Response).withCache("stale")
 			r.Freshness = s.freshness(r.state)
 			r.Freshness.Stale = true

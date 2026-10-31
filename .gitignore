@@ -1,10 +1,12 @@
 # confidential handouts and organisers' material stay out of the repository
+CUBOID_BUILD_PROMPT.md
 *.pdf
 provided/*
 !provided/README.md
 .env
 artifacts/*
 !artifacts/targets/
+!artifacts/safety/
 !artifacts/speed/
 !artifacts/growth/
 !artifacts/freshness/

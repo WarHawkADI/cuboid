@@ -113,7 +113,7 @@ async function parse<T>(r: Response): Promise<T> {
   } catch {
     throw new ApiError({ status: r.status, type: "bad_response", title: "Unreadable response", detail: text.slice(0, 200) });
   }
-  if (!r.ok) throw new ApiError(body as Problem);
+  if (!r.ok) throw new ApiError({ type: "error", title: `The request failed (${r.status})`, ...(body as Partial<Problem>), status: r.status });
   return body as T;
 }
 

@@ -6,3 +6,6 @@ bin
 provided
 .git
 *.exe
+data
+tests
+docs

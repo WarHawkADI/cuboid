@@ -5,6 +5,7 @@ export interface RecPoint {
   t: number;
   app_p50: number;
   app_p95: number;
+  main_active: number;
   mode: string;
 }
 

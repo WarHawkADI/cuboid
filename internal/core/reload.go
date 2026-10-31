@@ -1,8 +1,10 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"time"
@@ -28,13 +30,26 @@ type ReloadReport struct {
 // rollups and measures are built from the mirror, so the main database is
 // not touched, and become queryable once built. An invalid file leaves the
 // running configuration in place and names the offending line.
+//
+// One reload runs at a time. Saving the file reaches here twice, from the file
+// watcher and from whoever saved it, so the second finds nothing left to do.
 func (c *Core) Reload(ctx context.Context) *ReloadReport {
+	c.reloadMu.Lock()
+	defer c.reloadMu.Unlock()
 	start := time.Now()
 	rep := &ReloadReport{}
 	fail := func(err error) *ReloadReport {
 		rep.Error = err.Error()
 		rep.TookMS = time.Since(start).Milliseconds()
 		c.Log.Warn("config reload rejected", "err", err)
+		return rep
+	}
+	raw, err := os.ReadFile(c.Opt.MetricsPath)
+	if err != nil {
+		return fail(err)
+	}
+	if bytes.Equal(raw, c.appliedConfig) {
+		rep.OK = true
 		return rep
 	}
 	old := c.Config()
@@ -81,8 +96,12 @@ func (c *Core) Reload(ctx context.Context) *ReloadReport {
 			rep.Removed = append(rep.Removed, name)
 		}
 	}
-	if err := c.Store.EnsureTables(ctx, next, c.Specs); err != nil {
-		return fail(err)
+	// ALTER TABLE takes an exclusive lock even when it changes nothing, and under
+	// load that deadlocks with live reads. A new rollup needs no new column.
+	if !reflect.DeepEqual(old.Sources, next.Sources) {
+		if err := c.Store.EnsureTables(ctx, next, c.Specs); err != nil {
+			return fail(err)
+		}
 	}
 	if _, err := c.Store.RegisterRollups(ctx, next); err != nil {
 		return fail(err)
@@ -120,6 +139,7 @@ func (c *Core) Reload(ctx context.Context) *ReloadReport {
 			c.Store.W.Exec(ctx, "DELETE FROM rollup_registry WHERE name = $1", name)
 		}
 	}
+	c.appliedConfig = raw
 	rep.OK = true
 	rep.TookMS = time.Since(start).Milliseconds()
 	c.Rec.Annotate(fmt.Sprintf("Config reloaded: %d rollups added", len(rep.Added)))

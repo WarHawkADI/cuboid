@@ -4,11 +4,10 @@
     "cpus": "12",
     "deployment": "every service on one machine",
     "go": "go1.26.0",
-    "host": "AdityaRai-Victus",
     "os": "windows",
     "postgres": "16"
   },
-  "generated_at": "2026-10-31 15:42",
+  "generated_at": "2026-10-31 18:51",
   "rows": [
     {
       "id": "T1",
@@ -16,7 +15,7 @@
       "how": "Time for each dashboard query at main tier",
       "good": "Under 1 second",
       "great": "Under 200 ms",
-      "measured": "Worst query p99 256 ms uncached (any store, largest included); p99 76 ms with 1000 dashboards",
+      "measured": "Worst query p99 230 ms uncached (any store, largest included); p99 3 ms with 1000 dashboards",
       "verdict": "Good",
       "command": "make speed-test"
     },
@@ -36,8 +35,8 @@
       "how": "Normal app query time, with and without dashboard load",
       "good": "Less than 25% slower",
       "great": "Less than 10% slower",
-      "measured": "Not measured",
-      "verdict": "Not measured",
+      "measured": "App p95 +17.5% (0.99 to 1.16 ms) with 1000 dashboards through Cuboid; +28.4% against Cuboid stopped (0.91 ms)",
+      "verdict": "Good",
       "command": "make safety-test"
     },
     {
@@ -56,7 +55,7 @@
       "how": "Query speed at 1M vs 10M records",
       "good": "Less than 5x slower",
       "great": "Less than 2x slower",
-      "measured": "Worst uncached p99 ratio 15.23x (FR-3 top 10 customers, last 30 days)",
+      "measured": "Worst uncached p99 ratio 13.66x (FR-3 top 10 customers, last 30 days)",
       "verdict": "Not met",
       "command": "make growth-test"
     }

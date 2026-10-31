@@ -1,0 +1,62 @@
+{
+  "tier": "main",
+  "generated_at": "2026-10-31T18:38:43.4578757+05:30",
+  "environment": {
+    "cpus": "12",
+    "deployment": "every service on one machine",
+    "go": "go1.26.0",
+    "os": "windows",
+    "postgres": "16"
+  },
+  "phases": [
+    {
+      "name": "App alone (no Cuboid, no dashboards)",
+      "app_p50_ms": 0,
+      "app_p95_ms": 0.905,
+      "app_p99_ms": 1.619,
+      "app_ops_per_s": 183.8,
+      "slower_p50_pct": 0,
+      "slower_p95_pct": 0,
+      "viewers": 0,
+      "dashboard_p99_ms": 0,
+      "dashboard_errors": 0
+    },
+    {
+      "name": "Cuboid running, no dashboards",
+      "app_p50_ms": 0,
+      "app_p95_ms": 0.989,
+      "app_p99_ms": 1.678,
+      "app_ops_per_s": 188.5,
+      "slower_p50_pct": 0,
+      "slower_p95_pct": 9.2817679558011,
+      "viewers": 0,
+      "dashboard_p99_ms": 0,
+      "dashboard_errors": 0
+    },
+    {
+      "name": "Cuboid, 1000 dashboards",
+      "app_p50_ms": 0,
+      "app_p95_ms": 1.162,
+      "app_p99_ms": 2.587,
+      "app_ops_per_s": 183.9,
+      "slower_p50_pct": 0,
+      "slower_p95_pct": 28.397790055248606,
+      "viewers": 1000,
+      "dashboard_p99_ms": 5.677,
+      "dashboard_errors": 0
+    },
+    {
+      "name": "Direct, 1000 dashboards",
+      "app_p50_ms": 2.021,
+      "app_p95_ms": 104.341,
+      "app_p99_ms": 178.458,
+      "app_ops_per_s": 54.2,
+      "slower_p50_pct": 0,
+      "slower_p95_pct": 11429.392265193368,
+      "viewers": 1000,
+      "dashboard_p99_ms": 5360.234,
+      "dashboard_errors": 0
+    }
+  ],
+  "note": "Same data, same app workload, same machine; databases, Cuboid, the app and the load generator share the machine's cores. Compare p95: the app's p50 sits near this machine's clock tick of about 0.5 ms."
+}

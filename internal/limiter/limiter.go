@@ -80,6 +80,7 @@ type tenant struct {
 type Limiter struct {
 	cfg     Config
 	global  *semaphore.Weighted
+	inStore atomic.Int64 // reads holding a global slot
 	mu      sync.Mutex
 	tenants map[string]*tenant
 	keys    map[string]*rate.Limiter
@@ -159,12 +160,18 @@ func (l *Limiter) Acquire(ctx context.Context, p string, heavy bool) (func(), er
 		return nil, ErrSaturated
 	}
 	t.admitted.Add(1)
+	l.inStore.Add(1)
 	return func() {
+		l.inStore.Add(-1)
 		l.global.Release(1)
 		in.Add(-1)
 		sem.Release(1)
 	}, nil
 }
+
+// Busy reports whether at least half of the aggregate store's slots are in use.
+// Background work backs off then, so it never queues in front of a viewer.
+func (l *Limiter) Busy() bool { return l.inStore.Load()*2 >= l.cfg.GlobalConcurrency }
 
 // State is one partition's limiter state, for the monitoring page.
 type State struct {

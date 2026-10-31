@@ -37,7 +37,7 @@ The applied LSN commits in the same transaction as the data, and only that commi
 
 ## Keeping busy dashboards fast
 - A moving preset such as `last_7d` is cached by name and reused until new data arrives or 30 seconds pass. Its answer echoes the `from` and `to` it was computed for.
-- When new data arrives, a request gets the last answer for up to 2 seconds, labelled `stale` with its true `as_of`, while one background refresh runs.
+- When new data arrives, a request gets the last answer, labelled `stale` with its true `as_of`, while one background refresh runs: for up to 2 seconds on a fixed range, and up to 30 seconds on a moving preset (see Moving ranges under load).
 - If the store cannot answer in time, for example at the peak of a rebuild, the newest answer held is served with its true age.
 - Top-N lists keyed by product or customer rank in SQL by one measure, and take the total for shares from a smaller rollup. Each verification checks this against the full result of the same snapshot.
 
@@ -65,3 +65,6 @@ The applied LSN commits in the same transaction as the data, and only that commi
 
 ## Scale-out path (a design, not built or tested)
 One reader per slot today. At 1,000+ tenants: shard across publications and slots or move to Kafka, partition engines by tenant hash, run stateless query nodes whose caches invalidate through `NOTIFY`, and partition cells and mirror by tenant.
+
+## Moving ranges under load
+Every flush invalidates a moving preset such as `last_7d` on any store it touches. Recomputing each one per flush reached hundreds of queries a second with 1,000 dashboards: viewers queued at p50 410 ms, and the extra load slowed the store app on the shared machine. So a preset refreshes at most once a second, every 5 seconds while the aggregate store is at half its concurrency or more, and never makes a viewer wait while its answer is under 30 seconds old. The answer served is exact as of its stated `as_of`. Dashboards' p99 fell to about 3 ms.

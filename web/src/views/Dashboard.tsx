@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import uPlot from "uplot";
 
 import { ApiError, DemoKey, Envelope, get, Item } from "../api";
+import { Bars, Trend as TrendPanel } from "../components/Charts";
 import { NumberDrawer, NumberRef } from "../components/NumberDrawer";
 import { count, RANGES, rupees } from "../format";
+import { Alerts } from "./Alerts";
 
 interface Summary {
   orders: number;
@@ -11,7 +12,7 @@ interface Summary {
   units: number;
   average_order_value: string;
 }
-interface Trend {
+interface TrendData {
   points: { t: string; value: number }[];
 }
 interface ItemsData {
@@ -21,89 +22,14 @@ interface ItemsData {
 // Each widget loads on its own: one slow query must not blank the page.
 interface Loaded {
   summary?: Envelope<Summary>;
-  trend?: Envelope<Trend>;
+  trend?: Envelope<TrendData>;
   top?: Envelope<ItemsData>;
   status?: Envelope<ItemsData>;
   category?: Envelope<ItemsData>;
   stores?: Envelope<ItemsData>;
 }
 
-const titleCase = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
-
-function TrendChart({ points }: { points: { t: string; value: number }[] }) {
-  const host = useRef<HTMLDivElement>(null);
-  const plot = useRef<uPlot | null>(null);
-  useEffect(() => {
-    if (!host.current) return;
-    const css = getComputedStyle(document.documentElement);
-    const slate = css.getPropertyValue("--slate").trim();
-    const rule = css.getPropertyValue("--rule").trim();
-    const font = `14px ${css.getPropertyValue("--ui").trim()}`;
-    const u = new uPlot(
-      {
-        width: host.current.clientWidth,
-        height: 220,
-        legend: { show: false },
-        cursor: { show: false },
-        axes: [
-          {
-            stroke: slate,
-            grid: { stroke: rule },
-            ticks: { stroke: rule },
-            font,
-            values: (_u, ts) => ts.map((t) => new Date(t * 1000).toLocaleDateString("en-IN", { day: "numeric", month: "short" })),
-          },
-          { stroke: slate, grid: { stroke: rule }, ticks: { stroke: rule }, font, size: 60, values: (_u, vs) => vs.map((v) => v.toLocaleString("en-IN")) },
-        ],
-        series: [{}, { stroke: css.getPropertyValue("--pen").trim(), width: 2, points: { show: false } }],
-        scales: { y: { range: (_u, _min, max) => [0, Math.max(max * 1.1, 1)] } },
-      },
-      [[], []],
-      host.current,
-    );
-    plot.current = u;
-    const obs = new ResizeObserver(() => host.current && u.setSize({ width: host.current.clientWidth, height: 220 }));
-    obs.observe(host.current);
-    return () => {
-      obs.disconnect();
-      u.destroy();
-    };
-  }, []);
-  useEffect(() => {
-    plot.current?.setData([points.map((p) => Date.parse(p.t) / 1000), points.map((p) => Number(p.value))]);
-  }, [points]);
-  const peak = points.reduce((m, p) => Math.max(m, Number(p.value)), 0);
-  return (
-    <div ref={host} role="img" aria-label={`Orders per day: ${points.length} days, highest ${peak}`} />
-  );
-}
-
-function Bars({ items, money, onOpen }: { items: Item[]; money: boolean; onOpen: (it: Item, shown: string) => void }) {
-  if (items.length === 0) return <p className="empty">No orders in this range. Try Last 30 days.</p>;
-  const peak = Math.max(...items.map((i) => Number(i.value)), 1);
-  return (
-    <div className="bars">
-      {items.map((it) => {
-        const shown = money ? rupees(it.value) : count(it.value);
-        return (
-          <div className="bar-row" key={`${it.tenant_id ?? ""}-${String(it.key)}`}>
-            <span className="bar-label" title={it.label}>
-              {titleCase(it.label)}
-            </span>
-            <div className="bar-track">
-              <div className="bar-fill" style={{ width: `${(100 * Number(it.value)) / peak}%` }} />
-            </div>
-            <span className="bar-value">
-              <button className="link" onClick={() => onOpen(it, shown)}>
-                {shown}
-              </button>
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+const NONE = "No orders in this range. Try Last 30 days.";
 
 export function Dashboard({ id, company, keys }: { id: number; company: boolean; keys: DemoKey[] }) {
   const [range, setRange] = useState("last_7d");
@@ -113,7 +39,10 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<NumberRef | null>(null);
+  const [dataset, setDataset] = useState<"orders" | "alerts">("orders");
+  const [before, setBefore] = useState<{ sales: number; orders: number; days: number } | null>(null);
 
+  const latest = useRef<{ from: string; to: string } | null>(null);
   const self = keys.find((k) => k.id === id && k.kind === (company ? "company" : "store"));
   const apiKey = self?.key ?? "";
   // A company owner can look at one store with the company key.
@@ -127,7 +56,7 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
   }, [range, status]);
 
   useEffect(() => {
-    if (!apiKey) return;
+    if (!apiKey || dataset !== "orders") return;
     let alive = true;
     const q = (extra: Record<string, string>) => new URLSearchParams({ ...params, ...extra }).toString();
     const noStatus = new URLSearchParams({ range }).toString();
@@ -168,13 +97,46 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
       alive = false;
       clearInterval(t);
     };
-  }, [apiKey, scopePath, params, range, status, showStores]);
+  }, [apiKey, scopePath, params, range, status, showStores, dataset]);
+
+  // The same length of time just before this range. Moved once a minute, not
+  // every refresh: a sentence of context does not need a query every 2 seconds.
+  latest.current = data.summary && range !== "all" ? { from: data.summary.from, to: data.summary.to } : null;
+  const hasWindow = latest.current !== null;
+  useEffect(() => {
+    setBefore(null);
+    if (!apiKey || !hasWindow || dataset !== "orders") return;
+    let alive = true;
+    const load = async () => {
+      const cur = latest.current;
+      if (!cur) return;
+      const from = Date.parse(cur.from);
+      const length = Date.parse(cur.to) - from;
+      if (!(length > 0)) return;
+      const iso = (t: number) => new Date(Math.floor(t / 1000) * 1000).toISOString().replace(".000Z", "Z");
+      const p = new URLSearchParams({ from: iso(from - length), to: iso(from), ...(status ? { status } : {}) });
+      try {
+        const env = await get<Envelope<Summary>>(`${scopePath}/orders/summary?${p}`, apiKey);
+        if (alive) setBefore({ sales: Number(env.data.sales), orders: env.data.orders, days: Math.round(length / 86400000) });
+      } catch {
+        if (alive) setBefore(null); // context only: the range's own numbers still stand
+      }
+    };
+    load();
+    const t = setInterval(load, 60000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [apiKey, scopePath, range, status, hasWindow, dataset]);
 
   const phrase = RANGES.find((r) => r.value === range)?.phrase ?? "";
   const s = data.summary?.data;
   const fresh = data.summary?.freshness;
   const opener = (label: string, value: string, endpoint: string, p: Record<string, string>, envelope: Envelope<unknown>) => () =>
     setOpen({ label, value, endpoint, params: p, envelope, scopePath, apiKey });
+  const change = before && s && before.sales > 0 ? (100 * (Number(s.sales) - before.sales)) / before.sales : null;
+  const earlier = before && before.days >= 2 ? `the ${before.days} days before` : "the same length of time before";
   const title = company ? `Company ${id}` : self?.name ?? `Store ${id}`;
 
   return (
@@ -184,6 +146,14 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
           <h1>{title}</h1>
           {!company && <span className="label">Store {id}</span>}
           <span className="push row">
+            <span className="segmented" role="group" aria-label="Dataset">
+              <button aria-pressed={dataset === "orders"} onClick={() => setDataset("orders")}>
+                Orders
+              </button>
+              <button aria-pressed={dataset === "alerts"} onClick={() => setDataset("alerts")}>
+                SOC alerts
+              </button>
+            </span>
             {company && self?.stores && (
               <select aria-label="Store" value={store ?? ""} onChange={(e) => setStore(e.target.value ? Number(e.target.value) : null)}>
                 <option value="">All {self.stores.length} stores</option>
@@ -201,24 +171,27 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
                 </option>
               ))}
             </select>
-            <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="">All statuses</option>
-              {["placed", "shipped", "delivered", "cancelled", "returned"].map((x) => (
-                <option key={x} value={x}>
-                  {x[0].toUpperCase() + x.slice(1)}
-                </option>
-              ))}
-            </select>
+            {dataset === "orders" && (
+              <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="">All statuses</option>
+                {["placed", "shipped", "delivered", "cancelled", "returned"].map((x) => (
+                  <option key={x} value={x}>
+                    {x[0].toUpperCase() + x.slice(1)}
+                  </option>
+                ))}
+              </select>
+            )}
           </span>
         </div>
         {!apiKey && <p className="empty">Waiting for demo keys. Cuboid may still be loading its first snapshot.</p>}
-        {error && <p className="alarm">{error}</p>}
-        {fresh && <p className={fresh.lag_ms > 30000 ? "stale" : "label"}>{fresh.updated[0].toUpperCase() + fresh.updated.slice(1)}</p>}
-        {apiKey && !s && !loaded && <p className="empty">Loading the numbers…</p>}
-        {s && data.summary && (
+        {dataset === "orders" && error && <p className="alarm">{error}</p>}
+        {dataset === "orders" && fresh && <p className={fresh.lag_ms > 30000 ? "stale" : "label"}>{fresh.updated[0].toUpperCase() + fresh.updated.slice(1)}</p>}
+        {dataset === "orders" && apiKey && !s && !loaded && <p className="empty">Loading the numbers…</p>}
+        {dataset === "orders" && s && data.summary && (
           <>
             <p className="summary">
-              {count(s.orders)} orders and {rupees(s.sales)} in sales {phrase}.
+              {count(s.orders)} orders and {rupees(s.sales)} in sales {phrase}
+              {change !== null && (Math.abs(change) < 0.5 ? `, about the same as ${earlier}` : `, ${Math.abs(change).toFixed(0)}% ${change > 0 ? "more" : "less"} than ${earlier}`)}.
             </p>
             <div className="figures">
               {(
@@ -242,30 +215,30 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
           </>
         )}
       </section>
-      <>
-        <section className="surface">
-          <h2>Orders per day, last 30 days</h2>
-          {data.trend ? <TrendChart points={data.trend.data.points} /> : <p className="empty">Loading…</p>}
-        </section>
+      {dataset === "alerts" && apiKey && <Alerts scopePath={scopePath} apiKey={apiKey} range={range} />}
+      {dataset === "orders" && (
+        <>
+          <section className="surface">{data.trend ? <TrendPanel title="Orders per day, last 30 days" unit="Orders" points={data.trend.data.points} /> : <p className="empty">Loading…</p>}</section>
           <div className="cols">
             <section className="surface stack">
               <h2>Top 10 products by sales</h2>
-              {data.top ? <Bars items={data.top.data.items} money onOpen={(it, v) => opener(it.label, v, "products/top", { ...params, n: "10", by: "sales" }, data.top!)()} /> : <p className="empty">Loading…</p>}
+              {data.top ? <Bars items={data.top.data.items} show={rupees} empty={NONE} onOpen={(it, v) => opener(it.label, v, "products/top", { ...params, n: "10", by: "sales" }, data.top!)()} /> : <p className="empty">Loading…</p>}
             </section>
             <section className="surface stack">
               <h2>Orders by status</h2>
-              {data.status ? <Bars items={data.status.data.items} money={false} onOpen={(it, v) => opener(it.label, v, "orders/breakdown", { range, by: "status" }, data.status!)()} /> : <p className="empty">Loading…</p>}
+              {data.status ? <Bars items={data.status.data.items} show={count} empty={NONE} onOpen={(it, v) => opener(it.label, v, "orders/breakdown", { range, by: "status" }, data.status!)()} /> : <p className="empty">Loading…</p>}
               <h2 className="rule">Orders by category</h2>
-              {data.category ? <Bars items={data.category.data.items.slice(0, 8)} money={false} onOpen={(it, v) => opener(it.label, v, "orders/breakdown", { ...params, by: "category" }, data.category!)()} /> : <p className="empty">Loading…</p>}
+              {data.category ? <Bars items={data.category.data.items.slice(0, 8)} show={count} empty={NONE} onOpen={(it, v) => opener(it.label, v, "orders/breakdown", { ...params, by: "category" }, data.category!)()} /> : <p className="empty">Loading…</p>}
               {data.stores && (
                 <>
                   <h2 className="rule">Orders by store</h2>
-                  <Bars items={data.stores.data.items} money={false} onOpen={(it, v) => opener(it.label, v, "orders/breakdown", { ...params, by: "store" }, data.stores!)()} />
+                  <Bars items={data.stores.data.items} show={count} empty={NONE} onOpen={(it, v) => opener(it.label, v, "orders/breakdown", { ...params, by: "store" }, data.stores!)()} />
                 </>
               )}
             </section>
           </div>
-      </>
+        </>
+      )}
       {open && <NumberDrawer num={open} onClose={() => setOpen(null)} />}
     </main>
   );

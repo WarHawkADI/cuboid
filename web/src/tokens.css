@@ -1,7 +1,6 @@
 :root {
   --canvas: #eef1f4; --paper: #ffffff; --ink: #16202a; --slate: #56616e; --rule: #d6dce3; --grid: #bac3cd;
   --pen: #2846c4; --umber: #8a5a2b; --limit: #c8222b; --amber: #a86400; --verified: #1d7a47;
-  --store-a: #6b3fa0; --store-b: #0f7c8a; --store-c: #b0446e;
   --band-direct: rgba(138, 90, 43, 0.09); --band-cache: rgba(168, 100, 0, 0.07); --band-cuboid: rgba(40, 70, 196, 0.06);
   --scrim: rgba(22, 32, 42, 0.28); --drawer-shadow: 0 12px 40px rgba(22, 32, 42, 0.22);
   --ui: "Atkinson Hyperlegible Next Variable", "Atkinson Hyperlegible Next", sans-serif;

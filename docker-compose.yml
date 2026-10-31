@@ -2,6 +2,7 @@
 #   docker compose up -d --build                         start the stack
 #   docker compose --profile seed run --rm seed          load the small tier (1M orders, 10 stores)
 #   open http://localhost:8080/monitor
+# Optional profiles: bench (the measured tests), provided (the organisers' script).
 # Passwords below are documented development defaults for a local, offline stack.
 
 x-app: &app
@@ -56,6 +57,7 @@ services:
   cuboid:
     <<: *app
     command: ["supervisor", "--", "cuboid", "serve"]
+    user: root                        # may write to ./config, whichever host user owns it (bonus B-4 demo)
     environment:
       CUBOID_MAIN_CDC_DSN: postgres://cuboid_cdc:cuboid_cdc@maindb:5432/shop
       CUBOID_MAIN_VERIFY_DSN: postgres://cuboid_verify:cuboid_verify@maindb:5432/shop
@@ -64,6 +66,7 @@ services:
       CUBOID_KEY_PEPPER: ${CUBOID_KEY_PEPPER:-dev-pepper-change-me}
       CUBOID_DEMO_MODE: ${CUBOID_DEMO_MODE:-true}
       CUBOID_DEMO_KEY_SEED: ${CUBOID_DEMO_KEY_SEED:-cuboid-demo}
+      CUBOID_CORS_ORIGINS: ${CUBOID_CORS_ORIGINS:-}
       CUBOID_FLUSH_INTERVAL: 1s
       CUBOID_STOREAPP_URL: http://storesim:8081
       CUBOID_LOADGEN_URL: http://loadgen:8082
@@ -103,6 +106,41 @@ services:
     command: ["seed", "--tier", "${SEED_TIER:-small}"]
     environment:
       SEED_MAIN_DSN: postgres://postgres:postgres@maindb:5432/shop
+
+  # docker compose --profile bench run --rm bench speed
+  # The safety test stops and starts Cuboid, which a container cannot do to its
+  # neighbour: run it from the host with make safety-test.
+  bench:
+    <<: *app
+    profiles: ["bench"]
+    restart: "no"
+    entrypoint: ["bench"]
+    environment:
+      BENCH_CUBOID_URL: http://cuboid:8080
+      BENCH_STOREAPP_URL: http://storesim:8081
+      BENCH_LOADGEN_URL: http://loadgen:8082
+      BENCH_ARTIFACTS: /app/artifacts
+    user: root
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./docs:/app/docs
+
+  # docker compose --profile provided run --rm provided-seed --tier small
+  # See provided/README.md.
+  provided-seed:
+    image: postgres:16-alpine
+    profiles: ["provided"]
+    restart: "no"
+    entrypoint: ["sh", "/provided/run.sh"]
+    depends_on:
+      maindb: {condition: service_healthy}
+    environment:
+      PGHOST: maindb
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: shop
+    volumes:
+      - ./provided:/provided:ro
 
 volumes:
   maindata:

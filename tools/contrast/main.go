@@ -12,7 +12,6 @@ import (
 var tokens = map[string]string{
 	"canvas": "#EEF1F4", "paper": "#FFFFFF", "ink": "#16202A", "slate": "#56616E", "rule": "#D6DCE3", "grid": "#BAC3CD",
 	"pen": "#2846C4", "umber": "#8A5A2B", "limit": "#C8222B", "amber": "#A86400", "verified": "#1D7A47",
-	"storeA": "#6B3FA0", "storeB": "#0F7C8A", "storeC": "#B0446E",
 }
 
 type pair struct {
@@ -28,7 +27,6 @@ var pairs = []pair{
 	{"paper", "pen", 4.5, "text on primary buttons"},
 	{"umber", "paper", 4.5, "Direct path label"}, {"limit", "paper", 4.5, "breach and blocked text"},
 	{"amber", "paper", 4.5, "stale and limited text"}, {"verified", "paper", 4.5, "exact and Great text"},
-	{"storeA", "paper", 3, "tenant lane A"}, {"storeB", "paper", 3, "tenant lane B"}, {"storeC", "paper", 3, "tenant lane C"},
 }
 
 func lum(hex string) float64 {

@@ -89,8 +89,10 @@ td.num, th.num { text-align: right; }
 .gate { border-left: 2px solid var(--ink); padding-left: var(--s2); font-size: var(--t-xs); }
 .gate.has-blocks { border-left-color: var(--limit); }
 .lane-name { font-weight: 600; font-size: var(--t-s); }
-.lane-cell { height: 6px; }
-.lane-a { background: var(--store-a); } .lane-b { background: var(--store-b); } .lane-c { background: var(--store-c); }
+.lane-cell { min-height: 28px; display: flex; align-items: center; font-size: var(--t-xs); border-bottom: 2px solid transparent; }
+.lane-reached { border-bottom-color: var(--limit); }
+.lane-mark { color: var(--limit); font-weight: 600; }
+.trend-table { max-height: 220px; overflow-y: auto; }
 .outcome { font-size: var(--t-l); font-weight: 600; }
 
 .autopilot { position: fixed; left: var(--s4); right: var(--s4); bottom: var(--s4); background: var(--paper); border: 1px solid var(--ink); border-radius: var(--r-control); padding: var(--s3) var(--s4); z-index: 9; }

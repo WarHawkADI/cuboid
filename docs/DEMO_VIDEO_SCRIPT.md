@@ -5,7 +5,7 @@ About 2.5 minutes. Record `/monitor` at 1280x720 on the main tier. Numbers are f
 | Time | Shot | Voice-over |
 |---|---|---|
 | 0:00 | Recorder on Direct | "Ten million orders, a hundred stores, a thousand dashboards querying the main database. The app's own query time climbs." |
-| 0:20 | Click Cuboid | "Same load, same database. Dashboard queries on the main database drop to zero." |
+| 0:20 | Click Cuboid | "Same load, same database. Dashboard queries on the main database drop to zero, and the app's query time falls from about 100 milliseconds to about 1." |
 | 0:40 | Store 42 page | "The PRD's four questions on the largest store, each saying how fresh it is." |
 | 1:00 | Insert, then cancel an order | "A new order shows up in about a second. Cancel it, and it moves." |
 | 1:15 | Open a number, press Check against main database | "Any number. Compared at an exact point in the WAL, while writes run. Across 2,500 checks, every one was exact." |

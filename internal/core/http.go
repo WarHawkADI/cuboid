@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,6 +50,7 @@ func (c *Core) Routes() http.Handler {
 	mux.HandleFunc("POST /admin/path", c.operator(c.adminPath))
 	mux.HandleFunc("POST /admin/scenario", c.operator(c.adminScenario))
 	mux.HandleFunc("POST /admin/verify-batch", c.operator(c.adminVerifyBatch))
+	mux.HandleFunc("POST /admin/targets/run", c.operator(c.adminTargetsRun))
 	mux.HandleFunc("POST /admin/chaos", c.operator(c.adminChaos))
 	mux.HandleFunc("POST /admin/demo/metric", c.operator(c.adminDemoMetric))
 	mux.HandleFunc("POST /admin/app/tenants/{id}/orders", c.operator(c.adminAppOrder))
@@ -64,7 +66,35 @@ func (c *Core) Routes() http.Handler {
 	if c.Opt.WebDir != "" {
 		mux.Handle("GET /", spa(c.Opt.WebDir))
 	}
-	return securityHeaders(mux)
+	return c.corsLock(securityHeaders(mux))
+}
+
+// corsLock admits browser requests only from the UI's own origin and any origin
+// listed in CUBOID_CORS_ORIGINS. Requests without an Origin header (curl, the
+// load generator) are not cross-origin and pass.
+func (c *Core) corsLock(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" || origin == "http://"+r.Host || origin == "https://"+r.Host {
+			h.ServeHTTP(w, r)
+			return
+		}
+		if !slices.Contains(c.Opt.CORSOrigins, origin) {
+			query.WriteProblem(w, &query.Problem{Status: 403, Type: "origin_not_allowed", Title: "Origin not allowed",
+				Detail: "This API answers browsers only from its own UI.", Hint: "Add the origin to CUBOID_CORS_ORIGINS."})
+			return
+		}
+		hd := w.Header()
+		hd.Set("Access-Control-Allow-Origin", origin)
+		hd.Set("Vary", "Origin")
+		if r.Method == http.MethodOptions {
+			hd.Set("Access-Control-Allow-Methods", "GET, POST")
+			hd.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -386,12 +416,16 @@ func (c *Core) scorecard(w http.ResponseWriter, r *http.Request) {
 // results returns the measured artifacts for the results page, as written.
 func (c *Core) results(w http.ResponseWriter, r *http.Request) {
 	out := map[string]json.RawMessage{}
-	for key, path := range map[string]string{
-		"speed_main": "speed/main", "speed_small": "speed/small", "growth": "growth/latest", "freshness": "freshness/main",
-		"correctness": "correctness/main", "redteam": "redteam/main", "isolation": "isolation/dev", "chaos": "chaos/dev", "demo_check": "demo-check/dev",
+	for key, paths := range map[string][]string{
+		"speed_main": {"speed/main"}, "speed_small": {"speed/small"}, "growth": {"growth/latest"}, "freshness": {"freshness/main"},
+		"correctness": {"correctness/main"}, "redteam": {"redteam/main"}, "safety": {"safety/main"},
+		"isolation": {"isolation/main", "isolation/dev"}, "chaos": {"chaos/main", "chaos/dev"}, "demo_check": {"demo-check/main", "demo-check/dev"},
 	} {
-		if b, err := os.ReadFile(filepath.Join(c.Opt.ArtifactsDir, filepath.FromSlash(path)+".json")); err == nil && json.Valid(b) {
-			out[key] = b
+		for _, path := range paths { // the largest tier measured
+			if b, err := os.ReadFile(filepath.Join(c.Opt.ArtifactsDir, filepath.FromSlash(path)+".json")); err == nil && json.Valid(b) {
+				out[key] = b
+				break
+			}
 		}
 	}
 	writeJSON(w, 200, out)
@@ -453,6 +487,7 @@ func (c *Core) monitorState(w http.ResponseWriter, r *http.Request) {
 		"isolation": map[string]any{"layers": c.Svc.Drill.Counts(), "drill_mode": c.Svc.Drill.Mode().String(),
 			"cross_tenant_blocked": c.Svc.CrossTenantBlocked.Load(), "last_drill": c.lastDrill.Load()},
 		"flood":    c.lastFlood.Load(),
+		"quick":    c.quick.snapshot(),
 		"security": nonNil(last(c.Audit.Recent(), 20)),
 		"recorder": map[string]any{"points": points, "annotations": notes, "baseline_p95": c.Rec.Baseline()},
 		"rollups":  rollups,

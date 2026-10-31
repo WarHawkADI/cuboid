@@ -188,7 +188,12 @@ func (g *gen) set(ctx context.Context, mode string, viewers int) error {
 	default:
 		return fmt.Errorf("mode is off, direct, direct-cache or cuboid")
 	}
-	if mode != "off" {
+	g.mu.Lock()
+	running, known := g.mode != "off", len(g.stores) > 0
+	g.mu.Unlock()
+	// Between two running paths the stores are already known, and re-reading them
+	// would stall the switch while Direct has the machine swamped.
+	if mode != "off" && !(running && known) {
 		if err := g.loadStores(ctx); err != nil {
 			return fmt.Errorf("load stores from Cuboid: %w", err)
 		}

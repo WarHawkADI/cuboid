@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -54,6 +55,7 @@ func options(log *slog.Logger) core.Options {
 		NaiveURL:      env("CUBOID_NAIVE_URL", "http://localhost:8083"),
 		ArtifactsDir:  env("CUBOID_ARTIFACTS", "artifacts"),
 		WebDir:        env("CUBOID_WEB_DIR", "web/dist"),
+		CORSOrigins:   strings.FieldsFunc(env("CUBOID_CORS_ORIGINS", ""), func(r rune) bool { return r == ',' }),
 		Log:           log,
 	}
 }

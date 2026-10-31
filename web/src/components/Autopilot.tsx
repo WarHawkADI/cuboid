@@ -86,7 +86,11 @@ const beats: Beat[] = [
         endpoint: "orders/breakdown",
         params: { by: "status", from: from.toISOString(), to: to.toISOString() },
       });
-      await admin("/admin/verify-batch?n=100");
+      try {
+        await admin("/admin/verify-batch?n=100");
+      } catch (e) {
+        if (!(e instanceof ApiError && e.problem.status === 409)) throw e; // already running: that is fine
+      }
       return `${r.data.verdict}: fence ${r.data.fence_lsn}, Cuboid ${ms(r.data.cuboid_ms)}, direct ${ms(r.data.direct_ms)}. A batch of 100 more checks is running.`;
     },
   },
@@ -122,7 +126,11 @@ const beats: Beat[] = [
       await admin("/admin/demo/metric", { add: false });
       // The build scans every order, minutes at 10M. It runs online, so the demo
       // moves on and the last beat shows it finished, with queries answered throughout.
-      metricBuild = admin<{ ok: boolean; took_ms: number; error?: string }>("/admin/demo/metric", { add: true });
+      metricBuild = admin<{ ok: boolean; took_ms: number; error?: string }>("/admin/demo/metric", { add: true }).catch((e: unknown) => ({
+        ok: false,
+        took_ms: 0,
+        error: e instanceof Error ? e.message : "The build did not finish.",
+      }));
       return `${count(f.heavy_limited + f.light_limited)} queries from the flooding store limited; other stores' p99 ${ms(f.others_p99_before_ms)} before, ${ms(f.others_p99_during_ms)} during. Three lines of YAML added: breakdown by payment method is building from the mirror, without touching the main database, while queries keep answering.`;
     },
   },

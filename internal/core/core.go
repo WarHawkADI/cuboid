@@ -51,6 +51,7 @@ type Options struct {
 	NaiveURL      string // the direct baseline, for its query rate
 	ArtifactsDir  string
 	WebDir        string
+	CORSOrigins   []string // browser origins allowed besides the UI's own
 	Log           *slog.Logger
 }
 
@@ -70,13 +71,17 @@ type Core struct {
 	Keys    *auth.Keys
 	Members *auth.Membership
 	Audit   *audit.Log
-	Verify  *verify.Verifier
-	Limits  *limiter.Limiter
-	Hist    *cache.History
-	Rec     *monitor.Recorder
-	Alarms  *monitor.Alarms
-	Rebuild *monitor.Progress
-	Sampler *verify.Sampler
+	quick   quickState
+	// reloadMu serialises config reloads; appliedConfig is the file last applied.
+	reloadMu      sync.Mutex
+	appliedConfig []byte
+	Verify        *verify.Verifier
+	Limits        *limiter.Limiter
+	Hist          *cache.History
+	Rec           *monitor.Recorder
+	Alarms        *monitor.Alarms
+	Rebuild       *monitor.Progress
+	Sampler       *verify.Sampler
 
 	cfg     atomic.Pointer[config.Config] // the engine's configuration
 	engine  *engine.Engine

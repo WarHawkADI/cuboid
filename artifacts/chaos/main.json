@@ -1,0 +1,8 @@
+{
+  "all_exact": true,
+  "generated_at": "2026-10-31T18:08:35.1603412+05:30",
+  "kills": 20,
+  "recovery_max_ms": 3120,
+  "recovery_p50_ms": 1858,
+  "tier": "main"
+}

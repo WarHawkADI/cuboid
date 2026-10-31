@@ -24,11 +24,11 @@ About 4 minutes. Open <http://localhost:8080/monitor>, press **Run demo**, and p
 | 8 | The scorecard | Scroll to the targets. Say the weak rows before anyone asks. | The verdict column |
 | 9 | Close | "Fast for every store. Exact to the paisa. Never in the wrong store's hands." | The new breakdown, now live |
 
-Beat 9 waits for the YAML rollup to finish building, about 2.5 minutes at 10M, so talk through the scorecard and Results page while it builds. To skip the wait, run the demo on the small tier.
+Beat 9 waits for the YAML rollup to finish building, about a minute at 10M, so talk through the scorecard and Results page while it builds. Before the demo, you can also show the **SOC alerts** switch on a store page and **Run now** on the scorecard, which takes about 30 seconds. The store page's chart spikes on today because the store app has been writing all day: say so if asked.
 
 ## Do not claim
-- That the app stays under the 10% line with 1,000 dashboards. It has not been shown; on this laptop it stayed above the line through Cuboid, though lower than on the direct path. Say "dashboard queries on the main database drop to zero", which is what the recorder proves.
-- That Growth is Great. Top customers is 15x on the largest store.
+- That the app stays under the 10% line with 1,000 dashboards. It measured +17.5%, Good rather than Great, and +28.4% against Cuboid stopped.
+- That Growth is met. Top customers is 13.7x on the largest store.
 - That the Docker path has been tested, until someone has run it.
 - 1,000-tenant scale. It has been tested at 100.
 

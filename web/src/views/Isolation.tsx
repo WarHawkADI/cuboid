@@ -81,14 +81,20 @@ export function Isolation() {
                 <span className={l.blocked > 0 ? "blocked" : ""}>{count(l.blocked)} stopped</span>
               </div>
             ))}
-            {(shown?.stores ?? [42, 43, 44]).slice(0, 3).map((s, i) => (
-              <div key={s} style={{ display: "contents" }}>
-                <span className="lane-name">Store {s}</span>
-                {layers.map((l) => (
-                  <div key={l.name} className={`lane-cell lane-${"abc"[i]}`} />
-                ))}
-              </div>
-            ))}
+            <span className="lane-name">{running ? `Drill ${running}` : shown ? `Drill ${shown.mode}` : "No drill yet"}</span>
+            {layers.map((l, i) => {
+              const stopped = shown?.blocked_by_layer[l.name] ?? 0;
+              const furthest = Math.max(-1, ...layers.map((x, j) => ((shown?.blocked_by_layer[x.name] ?? 0) > 0 ? j : -1)));
+              return (
+                <div key={l.name} className={`lane-cell ${!running && i <= furthest ? "lane-reached" : ""}`}>
+                  {!running && stopped > 0 && (
+                    <span className="lane-mark">
+                      <span aria-hidden="true">×</span> {count(stopped)} stopped here
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>

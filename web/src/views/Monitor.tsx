@@ -32,6 +32,8 @@ export interface MonitorState {
     batch: { running: boolean; total: number; done: number; exact: number; mismatch: number; failed: number };
   };
   reload: { ok: boolean; error?: string; added_rollups?: string[] } | null;
+  sse: { connections: number };
+  quick: { running: boolean; phase?: string; finished_at: string; rows: { id: string; measured: string; verdict: string }[]; error?: string };
   recorder: { points: (RecPoint & { direct_qps: number; cuboid_qps: number; viewers: number })[]; annotations: Note[]; baseline_p95: number };
 }
 
@@ -114,7 +116,8 @@ export function Monitor() {
   const slower = baseline > 0 && last ? ((last.app_p95 - baseline) / baseline) * 100 : null;
   const latency = state?.latency ?? [];
   const hitRate = state && state.cache.hits + state.cache.misses > 0 ? (100 * state.cache.hits) / (state.cache.hits + state.cache.misses) : null;
-  const busiest = state?.limiter[0];
+  const limited = (state?.limiter ?? []).filter((l) => l.rejected > 0 || l.heavy_in_flight > 0).slice(0, 5);
+  const quick = state?.quick;
 
   return (
     <main className="page" style={pilot ? { paddingBottom: 170 } : undefined}>
@@ -147,7 +150,7 @@ export function Monitor() {
             </span>
           )}
           <span className="label">
-            {last ? `${last.viewers} dashboards; ${Math.round(last.direct_qps)} queries/s on the main database; ${Math.round(last.cuboid_qps)} queries/s through Cuboid` : ""}
+            {last ? `${last.viewers} dashboards; ${Math.round(last.direct_qps)} queries/s on the main database, ${last.main_active} sessions active; ${Math.round(last.cuboid_qps)} queries/s through Cuboid` : ""}
           </span>
         </div>
         <Recorder points={points} notes={notes} baseline={baseline} />
@@ -155,7 +158,12 @@ export function Monitor() {
 
       <div className="cols">
         <section className="surface" aria-labelledby="targets-title">
-          <h2 id="targets-title">The PRD's targets</h2>
+          <div className="head">
+            <h2 id="targets-title">The PRD's targets</h2>
+            <button className="push" disabled={quick?.running} onClick={() => act("Run now", "/admin/targets/run")}>
+              {quick?.running ? `Measuring ${quick.phase}…` : "Run now"}
+            </button>
+          </div>
           {score.rows ? (
             <>
               <div className="scroll-x">
@@ -185,6 +193,24 @@ export function Monitor() {
               <p className="label small">
                 Measured on the {score.tier} tier at {score.generated_at}. Reproduce each row with the command in docs/TARGETS.md.
               </p>
+              {quick && quick.rows.length > 0 && (
+                <div className="stack rule">
+                  <h3>Short run, just now</h3>
+                  <table>
+                    <tbody>
+                      {quick.rows.map((r) => (
+                        <tr key={r.id}>
+                          <td>{score.rows?.find((x) => x.id === r.id)?.name ?? r.id}</td>
+                          <td>{r.measured}</td>
+                          <td className={r.verdict === "Great" ? "great" : r.verdict === "Good" ? "good" : "bad"}>{r.verdict}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="label small">A short sample, not the full test. Safety and growth need a load run and a second data size: make targets.</p>
+                </div>
+              )}
+              {quick?.error && <p className="alarm">Run now stopped: {quick.error}</p>}
             </>
           ) : (
             <p className="empty">Not measured yet. Run make targets; every value here comes from that artifact.</p>
@@ -204,7 +230,7 @@ export function Monitor() {
               Cache <strong>{hitRate === null ? "no queries yet" : `${hitRate.toFixed(0)}% hits`}</strong>
             </span>
             <span>
-              Limiter <strong>{busiest ? `${busiest.partition}, ${count(busiest.rejected)} limited` : "idle"}</strong>
+              Live connections <strong>{state ? count(state.sse.connections) : "…"}</strong>
             </span>
           </div>
           <div>
@@ -244,6 +270,32 @@ export function Monitor() {
               </tbody>
             </table>
           </div>
+          {limited.length > 0 ? (
+            <div className="scroll-x">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Limiter, busiest</th>
+                    <th className="num">Heavy queries running</th>
+                    <th className="num">Limited</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {limited.map((l) => (
+                    <tr key={l.partition}>
+                      <td className="mono">{l.partition}</td>
+                      <td className="num">
+                        {l.heavy_in_flight} of {l.heavy_limit}
+                      </td>
+                      <td className={`num ${l.rejected > 0 ? "limited" : ""}`}>{count(l.rejected)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="label">Limiter idle: no store has been limited.</p>
+          )}
           <p className="label small">
             Layer state: {state?.state ?? "…"}. Applied to <span className="mono">{state?.freshness.lsn ?? "…"}</span>.
           </p>

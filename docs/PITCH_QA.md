@@ -2,11 +2,11 @@
 
 The hardest questions we expect, each with a short answer and where to show it.
 
-1. **Did you meet every target?** No. Freshness and correctness are Great. Query speed is Good because of one query, top customers, on the largest store; database safety has no final number; growth misses on that same query. *Show: Results page.*
+1. **Did you meet every target?** No. Freshness and correctness are Great. Query speed and database safety are Good. Growth is not met, because of one query, top customers, which also keeps query speed from Great. *Show: Results page.*
 
 2. **Why is top customers slow?** Its cost grows with the customers in the range, about 130,000 on the largest store, and rollups cannot shrink that. Viewers get it from cache in milliseconds, and the direct query was slower than ours in our checks. *Show: Results page, drawer on a top-N number.*
 
-3. **Does the dashboard load slow the app?** On the direct path it clearly does. Through Cuboid, no dashboard query reaches the main database, but on one laptop the app still slowed under 1,000 dashboards, because everything shares a disk and cores. A short test with no dashboards showed no cost once settled. *Show: recorder.*
+3. **Does the dashboard load slow the app?** Direct: app p95 goes to 104 ms. Through Cuboid: 0.99 to 1.16 ms, +17.5%, and +28.4% against Cuboid stopped, because everything shares one laptop's cores and disk. No dashboard query reaches the main database. *Show: recorder.*
 
 4. **How do I know the numbers are right?** Press "Check against main database" on any number. It compares at an exact WAL position while writes run. 2,500 of 2,500 were exact at 10M. *Show: number drawer.*
 
@@ -18,11 +18,11 @@ The hardest questions we expect, each with a short answer and where to show it.
 
 8. **Why not ClickHouse?** It scans faster and we would use it for ad-hoc analytics. We need retractions, mirror rows and the replication position committed in one transaction, plus row-level security. *Show: ADR-004.*
 
-9. **What if Cuboid crashes mid-write?** The position commits with the data, so it resumes exactly. Five `kill -9`s under writes came back in about 1.2 seconds and stayed exact, at the dev tier. The main database also crashed once at 10M, and every store matched afterwards. *Show: Kill Cuboid control.*
+9. **What if Cuboid crashes mid-write?** The position commits with the data, so it resumes exactly. Twenty `kill -9`s under writes at 10M came back within 3.1 seconds, with 500 of 500 checks exact. The main database also crashed once at 10M, and every store matched afterwards. *Show: Kill Cuboid control.*
 
 10. **What does replication cost the main database?** Extra WAL for `REPLICA IDENTITY FULL` on updates and deletes, which we have not yet measured, plus retained WAL if Cuboid falls behind, capped at 4 GB. *Show: ADR-003.*
 
-11. **What happens during a rebuild?** Queries keep answering from the old tables, labelled with their true age. A rebuild from main pauses the stream and took about 10 minutes at 10M; writes made meanwhile are applied afterwards. *Show: rebuild control.*
+11. **What happens during a rebuild?** Queries keep answering from the old tables, labelled with their true age. A rebuild from main pauses the stream and took about 10 minutes at 10M, with 0 failed queries; writes made meanwhile are applied afterwards. *Show: rebuild control.*
 
 12. **Would it survive 1,000 clients?** Not proven. We tested 100. The path is a design: shard slots, partition by tenant hash, stateless query nodes. *Show: ADR-010.*
 
