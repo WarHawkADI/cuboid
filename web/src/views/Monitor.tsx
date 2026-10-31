@@ -77,11 +77,11 @@ export function Monitor() {
         if (!alive) return;
         setState(s);
         setError("");
-        if (s.recorder.points.length) {
+        if (s.recorder.points?.length) {
           since.current = s.recorder.points[s.recorder.points.length - 1].t;
           setPoints((p) => [...p, ...s.recorder.points].slice(-900));
         }
-        if (s.recorder.annotations.length) setNotes((n) => [...n, ...s.recorder.annotations].slice(-60));
+        if (s.recorder.annotations?.length) setNotes((n) => [...n, ...s.recorder.annotations].slice(-60));
       } catch {
         if (alive) setError("Cuboid is not answering. It may be restarting; this page keeps trying.");
       }
@@ -112,6 +112,7 @@ export function Monitor() {
   const mode = last?.mode ?? "off";
   const baseline = state?.recorder.baseline_p95 ?? 0;
   const slower = baseline > 0 && last ? ((last.app_p95 - baseline) / baseline) * 100 : null;
+  const latency = state?.latency ?? [];
   const hitRate = state && state.cache.hits + state.cache.misses > 0 ? (100 * state.cache.hits) / (state.cache.hits + state.cache.misses) : null;
   const busiest = state?.limiter[0];
 
@@ -224,7 +225,7 @@ export function Monitor() {
                 </tr>
               </thead>
               <tbody>
-                {state?.latency.map((l) => (
+                {latency.map((l) => (
                   <tr key={l.name}>
                     <td className="mono">{l.name}</td>
                     <td className="num">{ms(l.p50)}</td>
@@ -233,7 +234,7 @@ export function Monitor() {
                     <td className="num">{count(l.count)}</td>
                   </tr>
                 ))}
-                {state && state.latency.length === 0 && (
+                {state && latency.length === 0 && (
                   <tr>
                     <td colSpan={5} className="empty">
                       No queries in the last minute. Switch to Cuboid above.

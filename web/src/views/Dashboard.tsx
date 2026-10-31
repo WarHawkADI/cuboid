@@ -18,14 +18,17 @@ interface ItemsData {
   items: Item[];
 }
 
+// Each widget loads on its own: one slow query must not blank the page.
 interface Loaded {
-  summary: Envelope<Summary>;
-  trend: Envelope<Trend>;
-  top: Envelope<ItemsData>;
-  status: Envelope<ItemsData>;
-  category: Envelope<ItemsData>;
+  summary?: Envelope<Summary>;
+  trend?: Envelope<Trend>;
+  top?: Envelope<ItemsData>;
+  status?: Envelope<ItemsData>;
+  category?: Envelope<ItemsData>;
   stores?: Envelope<ItemsData>;
 }
+
+const titleCase = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 function TrendChart({ points }: { points: { t: string; value: number }[] }) {
   const host = useRef<HTMLDivElement>(null);
@@ -43,8 +46,14 @@ function TrendChart({ points }: { points: { t: string; value: number }[] }) {
         legend: { show: false },
         cursor: { show: false },
         axes: [
-          { stroke: slate, grid: { stroke: rule }, ticks: { stroke: rule }, font },
-          { stroke: slate, grid: { stroke: rule }, ticks: { stroke: rule }, font, size: 60 },
+          {
+            stroke: slate,
+            grid: { stroke: rule },
+            ticks: { stroke: rule },
+            font,
+            values: (_u, ts) => ts.map((t) => new Date(t * 1000).toLocaleDateString("en-IN", { day: "numeric", month: "short" })),
+          },
+          { stroke: slate, grid: { stroke: rule }, ticks: { stroke: rule }, font, size: 60, values: (_u, vs) => vs.map((v) => v.toLocaleString("en-IN")) },
         ],
         series: [{}, { stroke: css.getPropertyValue("--pen").trim(), width: 2, points: { show: false } }],
         scales: { y: { range: (_u, _min, max) => [0, Math.max(max * 1.1, 1)] } },
@@ -79,7 +88,7 @@ function Bars({ items, money, onOpen }: { items: Item[]; money: boolean; onOpen:
         return (
           <div className="bar-row" key={`${it.tenant_id ?? ""}-${String(it.key)}`}>
             <span className="bar-label" title={it.label}>
-              {it.label}
+              {titleCase(it.label)}
             </span>
             <div className="bar-track">
               <div className="bar-fill" style={{ width: `${(100 * Number(it.value)) / peak}%` }} />
@@ -100,7 +109,8 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
   const [range, setRange] = useState("last_7d");
   const [status, setStatus] = useState("");
   const [store, setStore] = useState<number | null>(null);
-  const [data, setData] = useState<Loaded | null>(null);
+  const [data, setData] = useState<Loaded>({});
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<NumberRef | null>(null);
 
@@ -120,25 +130,38 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
     if (!apiKey) return;
     let alive = true;
     const q = (extra: Record<string, string>) => new URLSearchParams({ ...params, ...extra }).toString();
+    const noStatus = new URLSearchParams({ range }).toString();
+    const paths: [keyof Loaded, string][] = [
+      ["summary", `${scopePath}/orders/summary?${q({})}`],
+      ["trend", `${scopePath}/orders/trend?${new URLSearchParams({ interval: "day", range: "last_30d", ...(status ? { status } : {}) })}`],
+      ["top", `${scopePath}/products/top?${q({ n: "10", by: "sales" })}`],
+      ["status", `${scopePath}/orders/breakdown?by=status&${noStatus}`],
+      ["category", `${scopePath}/orders/breakdown?${q({ by: "category" })}`],
+    ];
+    if (showStores) paths.push(["stores", `${scopePath}/orders/breakdown?${q({ by: "store" })}`]);
+    let busy = false;
     const load = async () => {
-      try {
-        const noStatus = new URLSearchParams({ range }).toString();
-        const [summary, trend, top, st, category, stores] = await Promise.all([
-          get<Envelope<Summary>>(`${scopePath}/orders/summary?${q({})}`, apiKey),
-          get<Envelope<Trend>>(`${scopePath}/orders/trend?${new URLSearchParams({ interval: "day", range: "last_30d", ...(status ? { status } : {}) })}`, apiKey),
-          get<Envelope<ItemsData>>(`${scopePath}/products/top?${q({ n: "10", by: "sales" })}`, apiKey),
-          get<Envelope<ItemsData>>(`${scopePath}/orders/breakdown?by=status&${noStatus}`, apiKey),
-          get<Envelope<ItemsData>>(`${scopePath}/orders/breakdown?${q({ by: "category" })}`, apiKey),
-          showStores ? get<Envelope<ItemsData>>(`${scopePath}/orders/breakdown?${q({ by: "store" })}`, apiKey) : Promise.resolve(undefined),
-        ]);
-        if (alive) {
-          setData({ summary, trend, top, status: st, category, stores });
-          setError("");
-        }
-      } catch (e) {
-        if (alive) setError(e instanceof ApiError ? e.message : "The numbers could not be loaded.");
+      if (busy) return; // a slow round must not stack up behind itself
+      busy = true;
+      let failure = "";
+      await Promise.all(
+        paths.map(async ([name, path]) => {
+          try {
+            const env = await get<never>(path, apiKey);
+            if (alive) setData((d) => ({ ...d, [name]: env }));
+          } catch (e) {
+            failure = e instanceof ApiError ? e.message : "Some numbers could not be loaded.";
+          }
+        }),
+      );
+      busy = false;
+      if (alive) {
+        setError(failure);
+        setLoaded(true);
       }
     };
+    setData({});
+    setLoaded(false);
     load();
     const t = setInterval(load, 2000);
     return () => {
@@ -148,8 +171,8 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
   }, [apiKey, scopePath, params, range, status, showStores]);
 
   const phrase = RANGES.find((r) => r.value === range)?.phrase ?? "";
-  const s = data?.summary.data;
-  const fresh = data?.summary.freshness;
+  const s = data.summary?.data;
+  const fresh = data.summary?.freshness;
   const opener = (label: string, value: string, endpoint: string, p: Record<string, string>, envelope: Envelope<unknown>) => () =>
     setOpen({ label, value, endpoint, params: p, envelope, scopePath, apiKey });
   const title = company ? `Company ${id}` : self?.name ?? `Store ${id}`;
@@ -191,7 +214,8 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
         {!apiKey && <p className="empty">Waiting for demo keys. Cuboid may still be loading its first snapshot.</p>}
         {error && <p className="alarm">{error}</p>}
         {fresh && <p className={fresh.stale ? "stale" : "label"}>{fresh.updated[0].toUpperCase() + fresh.updated.slice(1)}</p>}
-        {s && data && (
+        {apiKey && !s && !loaded && <p className="empty">Loading the numbers…</p>}
+        {s && data.summary && (
           <>
             <p className="summary">
               {count(s.orders)} orders and {rupees(s.sales)} in sales {phrase}.
@@ -207,7 +231,7 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
               ).map(([label, v]) => (
                 <div key={label}>
                   <div className="figure-v">
-                    <button className="link" onClick={opener(label, v, "orders/summary", params, data.summary)}>
+                    <button className="link" onClick={opener(label, v, "orders/summary", params, data.summary!)}>
                       {v}
                     </button>
                   </div>
@@ -218,22 +242,21 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
           </>
         )}
       </section>
-      {data && (
-        <>
-          <section className="surface">
-            <h2>Orders per day, last 30 days</h2>
-            <TrendChart points={data.trend.data.points} />
-          </section>
+      <>
+        <section className="surface">
+          <h2>Orders per day, last 30 days</h2>
+          {data.trend ? <TrendChart points={data.trend.data.points} /> : <p className="empty">Loading…</p>}
+        </section>
           <div className="cols">
             <section className="surface stack">
               <h2>Top 10 products by sales</h2>
-              <Bars items={data.top.data.items} money onOpen={(it, v) => opener(it.label, v, "products/top", { ...params, n: "10", by: "sales" }, data.top)()} />
+              {data.top ? <Bars items={data.top.data.items} money onOpen={(it, v) => opener(it.label, v, "products/top", { ...params, n: "10", by: "sales" }, data.top!)()} /> : <p className="empty">Loading…</p>}
             </section>
             <section className="surface stack">
               <h2>Orders by status</h2>
-              <Bars items={data.status.data.items} money={false} onOpen={(it, v) => opener(it.label, v, "orders/breakdown", { range, by: "status" }, data.status)()} />
+              {data.status ? <Bars items={data.status.data.items} money={false} onOpen={(it, v) => opener(it.label, v, "orders/breakdown", { range, by: "status" }, data.status!)()} /> : <p className="empty">Loading…</p>}
               <h2 className="rule">Orders by category</h2>
-              <Bars items={data.category.data.items.slice(0, 8)} money={false} onOpen={(it, v) => opener(it.label, v, "orders/breakdown", { ...params, by: "category" }, data.category)()} />
+              {data.category ? <Bars items={data.category.data.items.slice(0, 8)} money={false} onOpen={(it, v) => opener(it.label, v, "orders/breakdown", { ...params, by: "category" }, data.category!)()} /> : <p className="empty">Loading…</p>}
               {data.stores && (
                 <>
                   <h2 className="rule">Orders by store</h2>
@@ -242,8 +265,7 @@ export function Dashboard({ id, company, keys }: { id: number; company: boolean;
               )}
             </section>
           </div>
-        </>
-      )}
+      </>
       {open && <NumberDrawer num={open} onClose={() => setOpen(null)} />}
     </main>
   );

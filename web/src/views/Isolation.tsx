@@ -63,6 +63,7 @@ export function Isolation() {
   };
 
   const layers = state?.isolation.layers ?? [];
+  const security = state?.security ?? [];
   const shown = report ?? state?.isolation.last_drill ?? null;
   return (
     <main className="page">
@@ -96,7 +97,7 @@ export function Isolation() {
         <p className="label">
           A drill injects a fault into Cuboid's own code and sends mixed load from several stores, cancelling some requests mid-flight. Each answer is compared with what its store should see. It is labelled as a drill and runs only in demo mode, against this local stack.
         </p>
-        <div className="cols">
+        <div className="thirds">
           {DRILLS.map((d) => (
             <div key={d.mode} className="stack rule">
               <h3>
@@ -128,11 +129,11 @@ export function Isolation() {
       </section>
       <section className="surface stack">
         <h2>Security events</h2>
-        {state && state.security.length === 0 && <p className="empty">None recorded in this run.</p>}
+        {state && security.length === 0 && <p className="empty">None recorded in this run.</p>}
         <div className="scroll-x">
           <table>
             <tbody>
-              {state?.security
+              {security
                 .slice(-10)
                 .reverse()
                 .map((e, i) => (

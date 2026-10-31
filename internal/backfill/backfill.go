@@ -239,7 +239,7 @@ func BuildAll(ctx context.Context, st *store.Store, cfg *config.Config, loc *tim
 	}
 	var done atomic.Int64
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(4)
+	g.SetLimit(2) // keep aggregate-store capacity for queries answering during a rebuild
 	for _, r := range rollups {
 		g.Go(func() error {
 			for _, s := range store.BuildRollup(cfg, r, loc, now, n, tenants) {

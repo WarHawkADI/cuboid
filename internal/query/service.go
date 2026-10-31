@@ -182,6 +182,7 @@ func (s *Service) Execute(ctx context.Context, t Target, req *Request, opt ExecO
 	// During a drill every request reaches the faulty path.
 	useCache := !opt.NoCache && s.Drill.Mode() == DrillOff
 	if useCache {
+		s.Drill.checked(LayerCachePartition)
 		if e, ok := s.Cache.Get(t.Partition, key); ok {
 			r := e.Value.(*Response).withCache("hit")
 			r.Freshness = s.freshness(s.Fresh())
@@ -227,6 +228,20 @@ func (s *Service) Execute(ctx context.Context, t Target, req *Request, opt ExecO
 		return s.compute(cctx, t, req, plan, cells, edgeRows, heavy)
 	})
 	if err != nil {
+		// The store could not answer in time (for example at the peak of a
+		// rebuild): the newest answer we hold, labelled with its true age, beats
+		// an error. Isolation failures are never served around.
+		var ct *errCrossTenant
+		if useCache && !errors.As(err, &ct) && !errors.Is(err, errWrongShape) && !errors.Is(err, store.ErrNoTenantContext) {
+			if e, ok := s.Cache.Peek(t.Partition, key); ok {
+				r := e.Value.(*Response).withCache("stale")
+				r.Freshness = s.freshness(r.state)
+				r.Freshness.Stale = true
+				r.Meta.Timing.Total = ms(time.Since(start))
+				s.StaleServed.Add(1)
+				return r, nil
+			}
+		}
 		return nil, s.problemFor(err, t)
 	}
 	r := v.(*Response)
@@ -294,6 +309,8 @@ func (s *Service) compute(ctx context.Context, t Target, req *Request, plan *pla
 	if opt.SkipTenantContext {
 		s.Drill.injected()
 	}
+	s.Drill.checked(LayerRowSecurity)
+	s.Drill.checked(LayerResultCheck)
 	err := s.Store.ReadTx(ctx, t.Tenants, opt, func(tx pgx.Tx, f store.Freshness) error {
 		top := pushdown(req, plan)
 		res, err := s.read(ctx, tx, act.Cfg, plan, t, top)

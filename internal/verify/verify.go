@@ -149,7 +149,7 @@ func (v *Verifier) fenced(ctx context.Context, t query.Target, req *query.Reques
 	}
 	p := v.Pipeline()
 	if p == nil {
-		return nil, errors.New("the change stream is not running")
+		return nil, errors.New("Cuboid is rebuilding or reconnecting, so it cannot fence the stream right now. Try again in a moment.")
 	}
 	began := time.Now()
 	tok := token()

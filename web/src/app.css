@@ -35,6 +35,7 @@ button.link:hover { text-decoration-color: var(--pen); color: var(--pen); }
 .surface { background: var(--paper); padding: var(--s4); }
 .head { display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s2); }
 .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s4); }
+.thirds { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--s4); }
 .stack { display: flex; flex-direction: column; gap: var(--s3); }
 .row { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
 .rule { border-top: 1px solid var(--rule); padding-top: var(--s3); }

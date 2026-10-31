@@ -397,6 +397,7 @@ func (c *Core) bench(w http.ResponseWriter, r *http.Request) {
 func (c *Core) monitorState(w http.ResponseWriter, r *http.Request) {
 	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 	points, notes := c.Rec.Snapshot(since)
+	points, notes = nonNil(points), nonNil(notes)
 	f := c.freshness()
 	var lag int64 = -1
 	if as := f.AsOf(); !as.IsZero() {
@@ -425,23 +426,32 @@ func (c *Core) monitorState(w http.ResponseWriter, r *http.Request) {
 		"freshness":  map[string]any{"lag_ms": lag, "lsn": f.LSN, "as_of": f.AsOf()},
 		"slot":       c.Rec.Slot(),
 		"pipeline":   pipe,
-		"alarms":     c.Alarms.List(),
-		"latency":    c.Svc.Latency.Snapshot(),
+		"alarms":     nonNil(c.Alarms.List()),
+		"latency":    nonNil(c.Svc.Latency.Snapshot()),
 		"cache":      map[string]any{"hits": hits, "misses": misses, "coalesced": c.Svc.Coalesced.Load(), "stale": c.Svc.StaleServed.Load()},
-		"limiter":    c.Limits.Snapshot(),
+		"limiter":    nonNil(c.Limits.Snapshot()),
 		"rate_429":   c.Limits.Rate429.Load(),
 		"rebuild":    c.Rebuild.Snapshot(),
 		"reload":     c.lastReload.Load(),
 		"verify": map[string]any{"checks": c.Verify.Checks.Load(), "exact": c.Verify.Exact.Load(), "mismatch": c.Verify.Mismatch.Load(),
-			"recent": first(c.Verify.Recent(), 12), "batch": batch, "sampler": c.Sampler.Enabled.Load()},
+			"recent": nonNil(first(c.Verify.Recent(), 12)), "batch": batch, "sampler": c.Sampler.Enabled.Load()},
 		"isolation": map[string]any{"layers": c.Svc.Drill.Counts(), "drill_mode": c.Svc.Drill.Mode().String(),
 			"cross_tenant_blocked": c.Svc.CrossTenantBlocked.Load(), "last_drill": c.lastDrill.Load()},
 		"flood":    c.lastFlood.Load(),
-		"security": last(c.Audit.Recent(), 20),
+		"security": nonNil(last(c.Audit.Recent(), 20)),
 		"recorder": map[string]any{"points": points, "annotations": notes, "baseline_p95": c.Rec.Baseline()},
 		"rollups":  rollups,
 		"sse":      map[string]any{"connections": c.Hub.Connections.Load(), "frames": c.Hub.Frames.Load()},
 	})
+}
+
+// nonNil makes an empty list encode as [] rather than null, which the page
+// would otherwise crash on the first time a list has no entries.
+func nonNil[T any](xs []T) []T {
+	if xs == nil {
+		return []T{}
+	}
+	return xs
 }
 
 func first[T any](xs []T, n int) []T {
