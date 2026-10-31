@@ -1,0 +1,149 @@
+openapi: 3.0.3
+info:
+  title: Cuboid
+  version: 1.0.0
+  description: >
+    Dashboard queries for one store (tenant) or one company. Access comes only
+    from the API key; an id outside the key's scope returns the same 404 as an
+    id that does not exist. `/companies/{id}/...` accepts every path shown here
+    under `/tenants/{id}/...`, plus `breakdown?by=store`.
+servers:
+  - url: http://localhost:8080
+security:
+  - key: []
+components:
+  securitySchemes:
+    key: {type: http, scheme: bearer}
+  parameters:
+    id: {name: id, in: path, required: true, schema: {type: integer}, description: Store id}
+    from: {name: from, in: query, schema: {type: string}, description: 'Inclusive. ISO 8601 date or date-time; without an offset it is wall-clock time in the main database''s zone.'}
+    to: {name: to, in: query, schema: {type: string}, description: Exclusive. Same format as from.}
+    range:
+      name: range
+      in: query
+      description: Preset, instead of from and to. Defaults to last_7d.
+      schema: {type: string, enum: [today, yesterday, this_week, last_7d, this_month, last_30d, last_90d, this_year, all]}
+    status: {name: status, in: query, schema: {type: string}, description: Filter on a dimension. channel and category work the same way.}
+    channel: {name: channel, in: query, schema: {type: string}}
+    category: {name: category, in: query, schema: {type: string}}
+    metric: {name: metric, in: query, schema: {type: string, enum: [orders, sales, units], default: orders}}
+  schemas:
+    Freshness:
+      type: object
+      required: [lsn, lag_ms, updated, stale]
+      properties:
+        as_of: {type: string, format: date-time}
+        lsn: {type: string, example: 0/3A1F2C8}
+        lag_ms: {type: integer}
+        updated: {type: string, example: updated 1 second ago}
+        stale: {type: boolean}
+    Envelope:
+      type: object
+      required: [query, from, to, data, freshness, meta]
+      properties:
+        tenant_id: {type: integer}
+        company_id: {type: integer}
+        stores: {type: array, items: {type: integer}}
+        query: {type: object}
+        from: {type: string}
+        to: {type: string}
+        data: {type: object, description: Shaped per endpoint. Money is an exact decimal string; counts are integers.}
+        freshness: {$ref: '#/components/schemas/Freshness'}
+        meta:
+          type: object
+          properties:
+            plan: {type: object, description: 'Rollup, whole-bucket segments and mirror edges used.'}
+            cache: {type: string, enum: [hit, miss, coalesced]}
+            exact: {type: boolean}
+            heavy: {type: boolean}
+            timing_ms: {type: object}
+    Problem:
+      type: object
+      required: [status, type, title]
+      properties:
+        status: {type: integer}
+        type: {type: string}
+        title: {type: string}
+        detail: {type: string}
+        hint: {type: string}
+  responses:
+    OK:
+      description: The answer
+      content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}
+    Problem:
+      description: 400 invalid parameter, 401 missing key, 404 outside the key's scope, 422 no rollup covers this, 429 limited
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+paths:
+  /tenants/{id}/orders/count:
+    get:
+      summary: FR-1 number of orders in a range
+      parameters: [{$ref: '#/components/parameters/id'}, {$ref: '#/components/parameters/from'}, {$ref: '#/components/parameters/to'}, {$ref: '#/components/parameters/range'}, {$ref: '#/components/parameters/status'}, {$ref: '#/components/parameters/channel'}, {$ref: '#/components/parameters/category'}]
+      responses: {'200': {$ref: '#/components/responses/OK'}, default: {$ref: '#/components/responses/Problem'}}
+  /tenants/{id}/orders/summary:
+    get:
+      summary: FR-1 orders, total sales, units and average order value
+      parameters: [{$ref: '#/components/parameters/id'}, {$ref: '#/components/parameters/from'}, {$ref: '#/components/parameters/to'}, {$ref: '#/components/parameters/range'}, {$ref: '#/components/parameters/status'}, {$ref: '#/components/parameters/channel'}, {$ref: '#/components/parameters/category'}]
+      responses: {'200': {$ref: '#/components/responses/OK'}, default: {$ref: '#/components/responses/Problem'}}
+  /tenants/{id}/orders/trend:
+    get:
+      summary: FR-2 trend per hour, day or month, zero-filled
+      parameters:
+        - {$ref: '#/components/parameters/id'}
+        - {$ref: '#/components/parameters/from'}
+        - {$ref: '#/components/parameters/to'}
+        - {$ref: '#/components/parameters/range'}
+        - {$ref: '#/components/parameters/metric'}
+        - {name: interval, in: query, schema: {type: string, enum: [hour, day, month], default: day}}
+        - {name: split_by, in: query, schema: {type: string}, description: 'Largest five values of a dimension, the rest as Other.'}
+      responses: {'200': {$ref: '#/components/responses/OK'}, default: {$ref: '#/components/responses/Problem'}}
+  /tenants/{id}/{entity}/top:
+    get:
+      summary: FR-3 top-N list
+      parameters:
+        - {$ref: '#/components/parameters/id'}
+        - {name: entity, in: path, required: true, schema: {type: string, enum: [products, customers, cities]}}
+        - {$ref: '#/components/parameters/from'}
+        - {$ref: '#/components/parameters/to'}
+        - {$ref: '#/components/parameters/range'}
+        - {$ref: '#/components/parameters/status'}
+        - {name: n, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 10}}
+        - {name: by, in: query, schema: {type: string, enum: [sales, units, orders], default: sales}}
+      responses: {'200': {$ref: '#/components/responses/OK'}, default: {$ref: '#/components/responses/Problem'}}
+  /tenants/{id}/orders/breakdown:
+    get:
+      summary: FR-4 breakdown by a dimension
+      parameters:
+        - {$ref: '#/components/parameters/id'}
+        - {name: by, in: query, required: true, schema: {type: string}, description: 'status, category, channel or city; store under /companies. Rollups added in config extend this.'}
+        - {$ref: '#/components/parameters/metric'}
+        - {$ref: '#/components/parameters/from'}
+        - {$ref: '#/components/parameters/to'}
+        - {$ref: '#/components/parameters/range'}
+      responses: {'200': {$ref: '#/components/responses/OK'}, default: {$ref: '#/components/responses/Problem'}}
+  /tenants/{id}/orders/stream:
+    get:
+      summary: Live answers over server-sent events
+      parameters:
+        - {$ref: '#/components/parameters/id'}
+        - {name: query, in: query, required: true, schema: {type: string}, example: orders/count}
+      responses: {'200': {description: 'text/event-stream of update events, each an Envelope'}, default: {$ref: '#/components/responses/Problem'}}
+  /tenants/{id}/meta:
+    get:
+      summary: What can be asked, generated from config
+      parameters: [{$ref: '#/components/parameters/id'}]
+      responses: {'200': {$ref: '#/components/responses/OK'}, default: {$ref: '#/components/responses/Problem'}}
+  /tenants/{id}/verify:
+    post:
+      summary: Check a query against the main database at a fence in the WAL
+      parameters: [{$ref: '#/components/parameters/id'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint]
+              properties:
+                endpoint: {type: string, example: orders/count}
+                params: {type: object, additionalProperties: {type: string}, example: {range: last_7d}}
+      responses: {'200': {$ref: '#/components/responses/OK'}, default: {$ref: '#/components/responses/Problem'}}

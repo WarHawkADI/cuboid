@@ -16,5 +16,13 @@ down)
     taskkill //F //IM "$p.exe" >/dev/null 2>&1 || pkill -x "$p" 2>/dev/null
   done
   ;;
-*) echo "usage: $0 up|down"; exit 2 ;;
+up-cuboid)
+  (nohup ./bin/supervisor -- ./bin/cuboid >> data/cuboid.log 2>&1 &)
+  ;;
+down-cuboid)
+  for p in supervisor cuboid; do
+    taskkill //F //IM "$p.exe" >/dev/null 2>&1 || pkill -x "$p" 2>/dev/null
+  done
+  ;;
+*) echo "usage: $0 up|down|up-cuboid|down-cuboid"; exit 2 ;;
 esac

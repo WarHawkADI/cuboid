@@ -1,0 +1,156 @@
+{
+  "auth": {
+    "bearer": [
+      {
+        "key": "token",
+        "type": "string",
+        "value": "{{key}}"
+      }
+    ],
+    "type": "bearer"
+  },
+  "info": {
+    "description": "The PRD's examples. Set the key variable to the store key from make keys.",
+    "name": "Cuboid",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "FR-1: number of orders in the last 7 days",
+      "request": {
+        "header": [],
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/tenants/{{store}}/orders/count?range=last_7d"
+        }
+      }
+    },
+    {
+      "name": "FR-1: orders and total sales in the last 7 days",
+      "request": {
+        "header": [],
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/tenants/{{store}}/orders/summary?range=last_7d"
+        }
+      }
+    },
+    {
+      "name": "FR-7: the PRD's example, with from and to",
+      "request": {
+        "header": [],
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/tenants/{{store}}/orders/count?from=2026-10-01\u0026to=2026-10-08"
+        }
+      }
+    },
+    {
+      "name": "Arbitrary timestamps",
+      "request": {
+        "header": [],
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/tenants/{{store}}/orders/count?from=2026-10-01T11:22:33\u0026to=2026-10-08T09:08:07"
+        }
+      }
+    },
+    {
+      "name": "FR-2: orders per day for the last 30 days",
+      "request": {
+        "header": [],
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/tenants/{{store}}/orders/trend?interval=day\u0026range=last_30d"
+        }
+      }
+    },
+    {
+      "name": "FR-3: top 10 products by sales this week",
+      "request": {
+        "header": [],
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/tenants/{{store}}/products/top?n=10\u0026by=sales\u0026range=this_week"
+        }
+      }
+    },
+    {
+      "name": "FR-4: orders by status",
+      "request": {
+        "header": [],
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/tenants/{{store}}/orders/breakdown?by=status\u0026range=last_7d"
+        }
+      }
+    },
+    {
+      "name": "FR-4: orders by category",
+      "request": {
+        "header": [],
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/tenants/{{store}}/orders/breakdown?by=category\u0026range=last_30d"
+        }
+      }
+    },
+    {
+      "name": "FR-5: this key on another store returns 404",
+      "request": {
+        "header": [],
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/tenants/{{other_store}}/orders/count?range=last_7d"
+        }
+      }
+    },
+    {
+      "name": "What can be asked",
+      "request": {
+        "header": [],
+        "method": "GET",
+        "url": {
+          "raw": "{{base}}/tenants/{{store}}/meta"
+        }
+      }
+    },
+    {
+      "name": "Check against main database",
+      "request": {
+        "body": {
+          "mode": "raw",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          },
+          "raw": "{\"endpoint\": \"orders/count\", \"params\": {\"range\": \"last_7d\"}}"
+        },
+        "header": [],
+        "method": "POST",
+        "url": {
+          "raw": "{{base}}/tenants/{{store}}/verify"
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "key",
+      "value": "paste-store-42-key"
+    },
+    {
+      "key": "store",
+      "value": "42"
+    },
+    {
+      "key": "other_store",
+      "value": "43"
+    }
+  ]
+}

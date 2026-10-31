@@ -1,0 +1,53 @@
+# Run make keys and paste the store key below.
+@base = http://localhost:8080
+@key = paste-store-42-key
+@store = 42
+@other_store = 43
+
+### FR-1: number of orders in the last 7 days
+GET {{base}}/tenants/{{store}}/orders/count?range=last_7d
+Authorization: Bearer {{key}}
+
+### FR-1: orders and total sales in the last 7 days
+GET {{base}}/tenants/{{store}}/orders/summary?range=last_7d
+Authorization: Bearer {{key}}
+
+### FR-7: the PRD's example, with from and to
+GET {{base}}/tenants/{{store}}/orders/count?from=2026-10-01&to=2026-10-08
+Authorization: Bearer {{key}}
+
+### Arbitrary timestamps
+GET {{base}}/tenants/{{store}}/orders/count?from=2026-10-01T11:22:33&to=2026-10-08T09:08:07
+Authorization: Bearer {{key}}
+
+### FR-2: orders per day for the last 30 days
+GET {{base}}/tenants/{{store}}/orders/trend?interval=day&range=last_30d
+Authorization: Bearer {{key}}
+
+### FR-3: top 10 products by sales this week
+GET {{base}}/tenants/{{store}}/products/top?n=10&by=sales&range=this_week
+Authorization: Bearer {{key}}
+
+### FR-4: orders by status
+GET {{base}}/tenants/{{store}}/orders/breakdown?by=status&range=last_7d
+Authorization: Bearer {{key}}
+
+### FR-4: orders by category
+GET {{base}}/tenants/{{store}}/orders/breakdown?by=category&range=last_30d
+Authorization: Bearer {{key}}
+
+### FR-5: this key on another store returns 404
+GET {{base}}/tenants/{{other_store}}/orders/count?range=last_7d
+Authorization: Bearer {{key}}
+
+### What can be asked
+GET {{base}}/tenants/{{store}}/meta
+Authorization: Bearer {{key}}
+
+### Check against main database
+POST {{base}}/tenants/{{store}}/verify
+Authorization: Bearer {{key}}
+Content-Type: application/json
+
+{"endpoint": "orders/count", "params": {"range": "last_7d"}}
+
