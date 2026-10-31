@@ -16,6 +16,8 @@ function storeKey(keys: DemoKey[], id: number) {
   return keys.find((k) => k.kind === "store" && k.id === id)?.key ?? "";
 }
 
+let metricBuild: Promise<{ ok: boolean; took_ms: number; error?: string }> | null = null;
+
 const beats: Beat[] = [
   {
     title: "The problem",
@@ -115,12 +117,13 @@ const beats: Beat[] = [
   {
     title: "The bonuses",
     say: "The biggest store floods heavy queries and nobody else notices. A new breakdown from three lines of YAML, built from the mirror.",
-    run: async (keys) => {
+    run: async () => {
       const f = await admin<{ heavy_limited: number; light_limited: number; others_p99_before_ms: number; others_p99_during_ms: number }>("/admin/flood", { store: STORE, seconds: 5 });
       await admin("/admin/demo/metric", { add: false });
-      const add = await admin<{ ok: boolean; took_ms: number }>("/admin/demo/metric", { add: true });
-      const b = await get<Envelope<{ items: { label: string }[] }>>(`/tenants/${STORE}/orders/breakdown?by=payment_method&range=last_7d`, storeKey(keys, STORE));
-      return `${count(f.heavy_limited + f.light_limited)} queries from the flooding store limited; other stores' p99 ${ms(f.others_p99_before_ms)} before, ${ms(f.others_p99_during_ms)} during. Breakdown by payment method live in ${ms(add.took_ms)}: ${b.data.items.map((i) => i.label).join(", ")}.`;
+      // The build scans every order, minutes at 10M. It runs online, so the demo
+      // moves on and the last beat shows it finished, with queries answered throughout.
+      metricBuild = admin<{ ok: boolean; took_ms: number; error?: string }>("/admin/demo/metric", { add: true });
+      return `${count(f.heavy_limited + f.light_limited)} queries from the flooding store limited; other stores' p99 ${ms(f.others_p99_before_ms)} before, ${ms(f.others_p99_during_ms)} during. Three lines of YAML added: breakdown by payment method is building from the mirror, without touching the main database, while queries keep answering.`;
     },
   },
   {
@@ -134,7 +137,14 @@ const beats: Beat[] = [
   {
     title: "Close",
     say: "Fast for every store. Exact to the paisa. Never in the main database's way, and never in the wrong tenant's hands.",
-    run: async () => "End of the demo.",
+    run: async (keys) => {
+      if (!metricBuild) return "End of the demo.";
+      const add = await metricBuild;
+      metricBuild = null;
+      if (!add.ok) return `The new metric was not applied: ${add.error ?? "unknown error"}.`;
+      const b = await get<Envelope<{ items: { label: string }[] }>>(`/tenants/${STORE}/orders/breakdown?by=payment_method&range=last_7d`, storeKey(keys, STORE));
+      return `Breakdown by payment method is live, built in ${ms(add.took_ms)}: ${b.data.items.map((i) => i.label).join(", ")}. End of the demo.`;
+    },
   },
 ];
 
