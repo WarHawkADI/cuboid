@@ -1,0 +1,87 @@
+-- Static aggregate-store tables. Mirror and rollup-cell tables are generated
+-- from config/metrics.yaml and the main database's catalog (internal/mirror).
+-- Idempotent: runs at every start as cuboid_writer.
+
+CREATE TABLE IF NOT EXISTS cdc_state (
+  id                  int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  slot                text,
+  applied_lsn         pg_lsn NOT NULL DEFAULT '0/0',
+  applied_commit_time timestamptz,
+  heartbeat_time      timestamptz,   -- send time of the latest heartbeat applied and flushed
+  backfilled_at       timestamptz,
+  flushes             bigint NOT NULL DEFAULT 0
+);
+INSERT INTO cdc_state (id) VALUES (1) ON CONFLICT DO NOTHING;
+
+-- Dimension values, dictionary-encoded. Id 0 is reserved for NULL.
+CREATE TABLE IF NOT EXISTS dict (
+  id    bigserial PRIMARY KEY,
+  dim   text NOT NULL,
+  value text NOT NULL,
+  UNIQUE (dim, value)
+);
+
+CREATE TABLE IF NOT EXISTS rollup_registry (
+  name       text PRIMARY KEY,
+  id         smallint UNIQUE NOT NULL,
+  source     text NOT NULL,
+  ready      boolean NOT NULL DEFAULT false,
+  definition text NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS data_versions (
+  tenant_id  int PRIMARY KEY,
+  version    bigint NOT NULL,
+  changed_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+  prefix     text PRIMARY KEY,
+  hash       bytea NOT NULL,
+  scope      text NOT NULL CHECK (scope IN ('store', 'company', 'operator')),
+  scope_id   int,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  revoked_at timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  at          timestamptz NOT NULL,
+  scope       text NOT NULL,
+  scope_id    int,
+  tenant_ids  int[] NOT NULL,
+  key_prefix  text NOT NULL,
+  endpoint    text NOT NULL,
+  query       text NOT NULL,
+  status      int NOT NULL,
+  result_rows int NOT NULL,
+  cache       text NOT NULL,
+  duration_ms real NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audit_log_at ON audit_log (at);
+
+CREATE TABLE IF NOT EXISTS security_events (
+  id         bigserial PRIMARY KEY,
+  at         timestamptz NOT NULL DEFAULT now(),
+  kind       text NOT NULL,
+  severity   text NOT NULL,
+  tenant_id  int,
+  key_prefix text,
+  detail     text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS verifications (
+  id         bigserial PRIMARY KEY,
+  at         timestamptz NOT NULL DEFAULT now(),
+  mode       text NOT NULL,
+  tenant_ids int[] NOT NULL,
+  query      text NOT NULL,
+  exact      boolean NOT NULL,
+  fence_lsn  pg_lsn,
+  cuboid_ms  real,
+  direct_ms  real,
+  r_minus    int,
+  r_plus     int,
+  retries    int
+);
+
+GRANT SELECT ON cdc_state, dict, rollup_registry, data_versions, api_keys TO cuboid_reader;
