@@ -1,4 +1,6 @@
-# Cuboid: Mitigata CyberForge submission
+<p align="center"><img src="docs/img/banner.svg" alt="Cuboid: dashboards p99 3 ms, new order visible in 1.1 s, 2,500 of 2,500 exact, 0 of 1,000,000 requests crossed stores" width="100%"></p>
+
+# Mitigata CyberForge submission
 
 **Problem 02: fast multi-tenant data aggregation.** Live dashboards for 100 stores over 10 million orders, without overloading the database that takes those orders, and without one store ever seeing another's numbers.
 
@@ -10,7 +12,7 @@
 | **The proof** | [Scorecard](docs/TARGETS.md) · [benchmarks](docs/BENCHMARKS.md) · [every PRD line traced](docs/REQUIREMENTS.md) · [raw results](artifacts/) |
 | **The honest list** | [Final report: what is done, what is not](docs/FINAL_REPORT.md) |
 
-![The monitoring page with 1,000 dashboards running](docs/img/monitor.png)
+<p align="center"><img src="docs/img/demo.gif" alt="The demo running at 10M orders" width="100%"></p>
 
 ## The problem, in the PRD's words
 Dashboards need counts, trends, top-N lists and breakdowns per store. Running those on the main database means "one big store's report makes the app slow for all stores". Caching alone trades that for the failure behind INC-02, where a cache bug showed users other users' data.
@@ -18,21 +20,7 @@ Dashboards need counts, trends, top-N lists and breakdowns per store. Running th
 ## Our answer
 Cuboid reads the main database's change stream and keeps exact, pre-computed rollups in a separate Postgres. Dashboards read only from there.
 
-```mermaid
-flowchart LR
-  subgraph today [Without Cuboid]
-    direction LR
-    D1[1,000 dashboards] -->|heavy aggregate queries| M1[(Main database)]
-    A1[Store app] -->|competes for the same resources| M1
-  end
-  subgraph after [With Cuboid]
-    direction LR
-    A2[Store app] --> M2[(Main database)]
-    M2 -->|change stream only| C[Cuboid]
-    C --> S[(Aggregate store)]
-    D2[1,000 dashboards] -->|API key| C
-  end
-```
+<p align="center"><img src="docs/img/before-after.svg" alt="Before: dashboards and the store app compete on the main database. After: dashboards read an aggregate store fed by the change stream." width="100%"></p>
 
 Three ideas carry the design:
 
@@ -41,6 +29,9 @@ Three ideas carry the design:
 3. **Separated six times over.** We inject INC-02's failure modes into our own code and count the leaks.
 
 ## What we measured
+
+<p align="center"><img src="docs/img/safety.svg" alt="With 1,000 dashboards, app p95 is 104 ms direct and 1.16 ms through Cuboid" width="100%"></p>
+
 10 million orders, 100 stores, 1,000 simulated dashboards, with both databases, Cuboid, the store app and the load generator sharing one laptop (12 logical CPUs, 15.6 GB of RAM).
 
 | PRD target | Good | Great | Measured | Verdict |
@@ -60,6 +51,14 @@ Three ideas carry the design:
 | 23 acceptance checks: the PRD's examples, both rebuilds, flood, live metric, drills | 23 of 23 pass |
 
 **The weak row.** Top customers has about 130,000 groups on the largest store, and rollups cannot shrink that. Viewers read it from cache in under 2 ms; only the uncached query is slow. The planned fix touches the exactly-once path, so we chose not to rush it.
+
+<p align="center"><img src="docs/img/growth.svg" alt="Growth from 1M to 10M orders on the largest store" width="90%"></p>
+
+## How it is built
+
+<p align="center"><img src="docs/img/architecture.svg" alt="Architecture: write path from the change stream to rollups, read path through six checks" width="100%"></p>
+
+<p align="center"><img src="docs/img/six-checks.svg" alt="Six isolation checks and where each drill fault was stopped: 0 leaked" width="100%"></p>
 
 ## Every PRD line
 | PRD | Status | See it |

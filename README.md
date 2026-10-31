@@ -1,24 +1,52 @@
-# Cuboid
+<p align="center">
+  <img src="docs/img/banner.svg" alt="Cuboid: dashboards p99 3 ms, new order visible in 1.1 s, 2,500 of 2,500 exact, 0 of 1,000,000 requests crossed stores" width="100%">
+</p>
 
-**Live dashboards for every store, exact to the paisa, without touching the database that takes the orders.**
+<p align="center">
+  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="HACKATHON.md"><b>Hackathon submission</b></a> ·
+  <a href="docs/media/demo_walkthrough.webm"><b>Watch the demo</b></a> ·
+  <a href="#the-targets-scorecard"><b>Scorecard</b></a> ·
+  <a href="#how-it-works"><b>How it works</b></a> ·
+  <a href="docs/PITCH_QA.md"><b>Hard questions</b></a>
+</p>
 
-Cuboid reads the main database's change stream, keeps exact pre-computed rollups in a separate Postgres, and answers counts, trends, top-N lists and breakdowns in milliseconds for each store. Every number can be checked against the live database. Built for Mitigata CyberForge, Problem 02; the submission summary is in [HACKATHON.md](HACKATHON.md).
+<p align="center">
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white">
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white">
+  <img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black">
+  <img alt="Tested at" src="https://img.shields.io/badge/tested%20at-10M%20orders%2C%20100%20stores-2846C4">
+</p>
 
-![The monitoring page: the store app's own query time, with the PRD's target lines, under 1,000 dashboards](docs/img/monitor.png)
+**Cuboid sits between the database and the dashboards.** It reads the main database's change stream, keeps exact pre-computed rollups in a separate Postgres, and answers counts, trends, top-N lists and breakdowns in milliseconds for each store. Every number can be checked against the live database, and the checks that keep stores apart are tested by injecting real faults into its own code.
 
-| At 10M orders, 100 stores, on one laptop | |
+## See it run
+
+<p align="center">
+  <img src="docs/img/demo.gif" alt="The demo running: the recorder, flipping dashboards to Cuboid, a new order, a check against the main database, leak drills, a flood and a new metric" width="100%">
+</p>
+
+One button drives this through the real APIs, at 10M orders. The [full recording](docs/media/demo_walkthrough.webm) takes about 3.5 minutes.
+
+## The problem, and the answer
+
+"One big store's report makes the app slow for all stores," says the PRD. Caching alone trades that for INC-02, where a cache bug showed users other users' data. Cuboid moves dashboards off the main database entirely, and treats separation as six independent checks.
+
+<p align="center"><img src="docs/img/before-after.svg" alt="Before: dashboards and the store app compete on the main database. After: dashboards read an aggregate store fed by the change stream." width="100%"></p>
+
+<p align="center"><img src="docs/img/safety.svg" alt="With 1,000 dashboards, app p95 is 104 ms direct and 1.16 ms through Cuboid; dashboard p99 is 5.4 s direct and 5.7 ms through Cuboid; the app does 54 operations a second direct and 184 through Cuboid" width="100%"></p>
+
+## Why it is different
+
+| | |
 |---|---|
-| 1,000 dashboards through Cuboid | **p99 3 ms**, 0 errors |
-| The app's own query time under that load | **1.16 ms** at p95. Direct: 104 ms |
-| New order to visible | **p99 1.1 s** |
-| Numbers matching direct SQL at the same WAL position | **2,500 of 2,500** |
-| Requests crossing stores, of 1,000,000 | **0** |
-| `kill -9` under writes, 20 times | Back within **3.1 s**, 500 of 500 checks exact |
+| **Exact, not approximate** | Updates and deletes retract the old row and add the new one. Rollups, mirror and replication position commit in one transaction, so a crash resumes exactly. 2,500 of 2,500 checks matched |
+| **Every number is provable** | Press "Check against main database" on any figure. It compares at an exact WAL position, while writes run. This check found a real bug that unit tests could not |
+| **Tested by breaking it** | Three drills inject INC-02's failure modes into Cuboid's own code: 0 leaked. 1,000,000 randomized requests with cancellations: 0 crossed stores. 20 `kill -9`s under writes: 500 of 500 checks exact |
+| **New metrics are config** | Three lines of YAML build a new breakdown from the mirror, live in about a minute at 10M, with no restart and no load on the main database |
+| **Honest about its limits** | One query misses its targets, and [the scorecard](#the-targets-scorecard) says so. [The final report](docs/FINAL_REPORT.md) lists what was left out |
 
-One query misses its targets: [top customers](#the-targets-scorecard). [The scorecard](#the-targets-scorecard) says so, and [the final report](docs/FINAL_REPORT.md) lists what was left out.
-
-## Contents
-[Quick start](#quick-start) · [Demo keys](#demo-keys) · [Endpoints](#the-endpoints) · [Try FR-6](#try-fr-6-yourself) · [Scorecard](#the-targets-scorecard) · [Bonuses](#the-bonuses) · [Screens](#screens) · [How it works](#how-it-works) · [Tests and tools](#tests-and-tools) · [More](#more)
+Built for Mitigata CyberForge, Problem 02. The submission summary is in [HACKATHON.md](HACKATHON.md).
 
 ## Quick start
 
@@ -157,6 +185,8 @@ Measured at 10M orders and 100 stores, with every service sharing one laptop (12
 | Correctness | Most queries | All queries | 2,500 of 2,500 exact, 500 of them during writes | **Great** |
 | Growth | Under 5x | Under 2x | Largest store: 1.2x to 3.2x for PRD examples. Top customers: 13.7x | **Not met** on top customers |
 
+<p align="center"><img src="docs/img/growth.svg" alt="Growth from 1M to 10M orders on the largest store: 1.2x to 3.2x on most queries, 13.7x on top customers" width="90%"></p>
+
 The two weak spots, plainly:
 
 - **Top customers.** Its cost grows with the number of customers in the range, which rollups cannot shrink. Viewers read it from cache in under 2 ms; the uncached query is the limit.
@@ -182,27 +212,13 @@ Security: the Isolation page runs leak drills that inject INC-02's failure modes
 
 | | |
 |---|---|
-| ![A store's dashboard](docs/img/store.png) **Store.** Each store's numbers, compared with the period before, and how fresh they are. | ![Where a number comes from](docs/img/drawer.png) **Any number.** How it was assembled, and a check against the main database. |
-| ![The isolation page after a drill](docs/img/isolation.png) **Isolation.** Run a leak drill and see which check stopped the fault. | ![SOC alerts on the same engine](docs/img/alerts.png) **Same engine.** SOC alerts through config alone. |
-
-A recording of the whole demo is at [docs/media/demo_walkthrough.webm](docs/media/demo_walkthrough.webm).
+| ![The monitoring page](docs/img/monitor.png) **Monitoring.** The store app's own query time, with the PRD's target lines, the path the dashboards take, and every control. | ![A store's dashboard](docs/img/store.png) **Store.** Each store's numbers, compared with the period before, and how fresh they are. |
+| ![Where a number comes from](docs/img/drawer.png) **Any number.** How it was assembled from rollups and mirror edges, and a check against the main database. | ![The isolation page after a drill](docs/img/isolation.png) **Isolation.** Run a leak drill and see which check stopped the fault. |
+| ![SOC alerts on the same engine](docs/img/alerts.png) **Same engine, your data.** SOC alerts through config alone. | ![Measured results](docs/img/results.png) **Results.** Every number read from a file in `artifacts/`. |
 
 ## How it works
 
-```mermaid
-flowchart LR
-  App[Store app] -->|normal reads and writes| Main[(Main database)]
-  Main -->|logical replication| CDC[Stream reader]
-  CDC --> Engine[Engine: retract old, add new]
-  Engine --> Flush[Flush: one transaction, every second]
-  Flush --> Agg[(Aggregate store: rollups, mirror, applied position)]
-  Dash[Dashboards, API clients] -->|API key| API[Query: auth, plan, cache, limit]
-  API -->|row-level security| Agg
-  API --> Guard[Response guard]
-  Guard --> Dash
-  Verify[Check] -.->|budgeted, read-only| Main
-  Verify -.-> Agg
-```
+<p align="center"><img src="docs/img/architecture.svg" alt="Architecture: the store app writes to the main database; a stream reader, engine and flush feed an aggregate store; dashboards read through key and path checks, planner, cache and limiter, and a response guard; a budgeted check compares against the main database." width="100%"></p>
 
 ### Exactly once
 Rollup changes, mirror changes and the replication position commit together. After a crash, the stream resumes from the committed position, and anything already applied is skipped.
@@ -221,12 +237,7 @@ sequenceDiagram
 ```
 
 ### Any time range, exact
-Rollups only hold whole hours, days and months. The planner picks the smallest rollup that covers the query, splits the range into whole buckets, and reads the two thin edges from a narrow mirror of the rows. So 11:22:33 to 09:08:07 a week later is as exact as a full month.
-
-```mermaid
-flowchart LR
-  E1[Edge: mirror rows] --> H1[Hours] --> D[Days] --> Mo[Months] --> D2[Days] --> H2[Hours] --> E2[Edge: mirror rows]
-```
+<p align="center"><img src="docs/img/range-slice.svg" alt="A range is tiled with mirror edges, hours, days and months" width="100%"></p>
 
 ### Proving a number
 A check writes a fence into the WAL, waits for Cuboid to reach it, and compares both answers at that point, accounting for transactions still in flight. It has caught a real bug: a commit straight after a heartbeat shares its LSN and looked already applied, which lost 2 orders in three minutes.
@@ -245,13 +256,30 @@ sequenceDiagram
   C-->>U: Exact match, or the rows that differ
 ```
 
-### Six checks between a store and an answer
-Each one assumes the others have failed. The leak drills inject those failures into Cuboid's own code: a shared cache, a connection that returns the previous request's rows (the INC-02 mechanism), and a forgotten tenant setting.
+### Keeping stores apart
+<p align="center"><img src="docs/img/six-checks.svg" alt="Six isolation checks, and where each drill fault was stopped: 0 leaked" width="100%"></p>
+
+### A new metric from YAML
 
 ```mermaid
 flowchart LR
-  R[Request] --> K[1 Key scope] --> P[2 Path check] --> C[3 Cache partition] --> S[4 Row security] --> T[5 Result check] --> G[6 Response guard] --> A[Answer]
+  Y[Three lines in config/metrics.yaml] --> V{Valid?}
+  V -->|No| E[Keep running, name the bad line]
+  V -->|Yes| B[Build a shadow from the mirror]
+  B --> S[Switch at a flush boundary]
+  S --> L[Live, with no restart]
 ```
+
+### When things go wrong
+
+| What happens | What Cuboid does | Evidence |
+|---|---|---|
+| Cuboid is killed under writes | Resumes from its committed position | 20 kills, back within 3.1 s, 500 of 500 exact |
+| The biggest store floods heavy queries | That store gets 429s, others stay flat | Over 3,500 limited, others' p99 under 3 ms |
+| A number looks wrong | Check it against the main database, then rebuild | 0 failed queries during rebuilds at 10M |
+| A bad config is saved | The old config stays live, and the error names the line | Config tests |
+| The aggregate store is too busy | The last exact answer is served, labelled with its age | Dashboards' p99 3 ms under load |
+| A replication slot falls behind | An alarm at 1 GB, and a 4 GB cap protects the main database's disk | Set and coded; not forced in a test |
 
 ### The techniques the PRD names
 
