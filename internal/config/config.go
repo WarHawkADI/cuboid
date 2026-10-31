@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,6 +55,9 @@ type Source struct {
 	Derived      Ordered[*Derived]   `yaml:"derived"`
 	Dimensions   Ordered[*Dimension] `yaml:"dimensions"`
 	Top          Ordered[*TopList]   `yaml:"top"`
+	// Ranked is set when a rank rollup is over this source: its cell table
+	// then indexes month cells by value.
+	Ranked bool `yaml:"-"`
 }
 
 // Measure is an exact, retractable aggregate.
@@ -65,7 +69,14 @@ type Measure struct {
 	Scale      int    `yaml:"scale"`       // decimal places when rendered
 	MinorUnits bool   `yaml:"minor_units"` // the column already holds integer minor units
 	Unit       string `yaml:"unit"`
+	// Nonnegative declares that no row's value is below zero. The main
+	// database must enforce it with a CHECK constraint (ValidateNonnegative).
+	Nonnegative bool `yaml:"nonnegative"`
 }
+
+// NeverNegative reports whether no row can contribute a negative value, which
+// exact top-N lists from month totals rely on (ADR-011).
+func (m *Measure) NeverNegative() bool { return m.Type == "count" || m.Nonnegative }
 
 // Derived is a ratio of two measures computed at read time.
 type Derived struct {
@@ -119,6 +130,9 @@ type Rollup struct {
 	Dims      []string          `yaml:"dims"`
 	GrainSpec map[string]string `yaml:"grains"`
 	KeyDim    string            `yaml:"key_dim"`
+	// Rank marks monthly totals per key that bound exact top-N lists. The
+	// planner never answers a query from it (ADR-011).
+	Rank bool `yaml:"rank"`
 	// Retention per grain; zero means the grain is kept for all time.
 	Retention map[timeutil.Grain]time.Duration `yaml:"-"`
 }
@@ -232,6 +246,16 @@ func (c *Config) RollupsFor(source string) []*Rollup {
 		}
 	}
 	return out
+}
+
+// RankRollup returns the rank rollup over source keyed by dim, or nil.
+func (c *Config) RankRollup(source, dim string) *Rollup {
+	for _, r := range c.RollupsFor(source) {
+		if r.Rank && r.Dims[0] == dim {
+			return r
+		}
+	}
+	return nil
 }
 
 // CellTable is the aggregate-store table holding a fact source's rollup cells.
@@ -444,6 +468,22 @@ func (c *Config) validateRollup(r *Rollup) error {
 		}
 		r.Retention[g] = d
 	}
+	if r.Rank {
+		if len(r.Dims) != 1 {
+			return at("rank needs exactly one dimension, the key the top-N list ranks")
+		}
+		d := s.Dimensions.Get(r.Dims[0])
+		if !d.IsKey() || d.Join != nil {
+			return at("rank dimension %q must be a key read from a column of %s, not a join", d.Name, s.Name)
+		}
+		if len(r.Retention) != 1 || !r.HasGrain(timeutil.GrainMonth) || r.Retention[timeutil.GrainMonth] != 0 {
+			return at("rank needs grains {month: all} and no other grain: every month's cells must exist")
+		}
+		if c.RankRollup(r.Source, r.Dims[0]) != r {
+			return at("another rank rollup already ranks %s", r.Dims[0])
+		}
+		s.Ranked = true
+	}
 	return nil
 }
 
@@ -519,4 +559,49 @@ func (c *Config) ValidateColumns(tables map[string][]string) error {
 		}
 	}
 	return nil
+}
+
+// ValidateNonnegative checks every measure declared nonnegative against the
+// main database's validated CHECK constraints (table -> definitions, as
+// pg_get_constraintdef prints them). The declaration is what lets top-N lists
+// skip keys, so it must be enforced where rows are written, not assumed.
+func (c *Config) ValidateNonnegative(checks map[string][]string) error {
+	for _, s := range c.FactSources() {
+		for _, m := range s.Measures.Values() {
+			if !m.Nonnegative || m.Type != "sum" {
+				continue
+			}
+			ok := false
+			for _, def := range checks[s.Name] {
+				if GuaranteesNonnegative(def, m.Column) {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				return fmt.Errorf("line %d: measure %s is declared nonnegative, but table %s has no CHECK (%s >= 0); add the constraint or remove the declaration",
+					m.Line, m.Name, s.Name, m.Column)
+			}
+		}
+	}
+	return nil
+}
+
+var nonnegConjunct = regexp.MustCompile(`^(?:"([^"]+)"|(\w+))\s*(?:>=|>)\s*\(?\d+\)?(?:::[a-z ]+)?$`)
+
+// GuaranteesNonnegative reports whether a CHECK constraint definition forces
+// col >= 0 on every row. Only a conjunction is accepted: one OR could let a
+// negative value through, so any definition with OR is refused.
+func GuaranteesNonnegative(def, col string) bool {
+	expr, ok := strings.CutPrefix(def, "CHECK ")
+	if !ok || strings.Contains(expr, " NOT VALID") || strings.Contains(strings.ToUpper(expr), " OR ") {
+		return false
+	}
+	for _, part := range strings.Split(expr, " AND ") {
+		m := nonnegConjunct.FindStringSubmatch(strings.Trim(part, "() "))
+		if m != nil && m[1]+m[2] == col {
+			return true
+		}
+	}
+	return false
 }

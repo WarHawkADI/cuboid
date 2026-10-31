@@ -65,11 +65,19 @@ func (c *Core) Reload(ctx context.Context) *ReloadReport {
 		return fail(err)
 	}
 	all, _, err := store.Catalog(ctx, plain, next)
+	if err != nil {
+		plain.Close(ctx)
+		return fail(err)
+	}
+	checks, err := store.Checks(ctx, plain, next)
 	plain.Close(ctx)
 	if err != nil {
 		return fail(err)
 	}
 	if err := next.ValidateColumns(all); err != nil {
+		return fail(err)
+	}
+	if err := next.ValidateNonnegative(checks); err != nil {
 		return fail(err)
 	}
 	var build []*config.Rollup

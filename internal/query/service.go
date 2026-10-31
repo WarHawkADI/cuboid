@@ -102,6 +102,8 @@ type topLimit struct {
 	measure string
 	n       int
 	total   int64
+	totaled bool       // total is already set, from the same reads as the list
+	bound   *BoundInfo // set when a rank rollup narrowed the list
 }
 
 // pushdown returns a limit when a top-N list is keyed by ids, the case with
@@ -185,7 +187,7 @@ func (s *Service) refresh(t Target, req *Request, plan *planner.Plan, key string
 // topTotal fills in a top-N's total for shares, from the smallest rollup that
 // covers the query without its key, in the same snapshot as the list.
 func (s *Service) topTotal(ctx context.Context, tx pgx.Tx, act *Active, t Target, plan *planner.Plan, top *topLimit) error {
-	if top == nil {
+	if top == nil || top.totaled {
 		return nil
 	}
 	q := *plan.Query
@@ -401,6 +403,9 @@ func (s *Service) compute(ctx context.Context, t Target, req *Request, plan *pla
 			Meta: Meta{Plan: describePlan(plan, s.Loc, cells, edgeRows), Cache: "miss", Exact: true, Heavy: heavy,
 				Timing: Timing{Store: storeMS}},
 		}
+		if top != nil {
+			resp.Meta.Plan.TopBound = top.bound
+		}
 		return nil
 	})
 	if err != nil {
@@ -409,57 +414,68 @@ func (s *Service) compute(ctx context.Context, t Target, req *Request, plan *pla
 	return resp, nil
 }
 
+// raw is one store result row: key ids and measures as the store returns them.
+type raw struct {
+	tenant int32
+	bucket int64
+	keys   []int64
+	vals   []int64
+}
+
 // read runs the plan's SQL and returns the result keyed by raw values.
 func (s *Service) read(ctx context.Context, tx pgx.Tx, cfg *config.Config, plan *planner.Plan, t Target, top *topLimit) (planner.Result, error) {
 	res := planner.Result{}
 	if plan.Rollup == nil {
 		return res, nil
 	}
-	enc := store.Encoder{Cfg: cfg, Dict: s.Dict}
-	only := ""
-	if top != nil {
-		only = top.measure
-	}
-	sql, args, ok, err := store.QuerySQL(plan, enc, s.Loc, store.Names{}, only)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return res, nil
-	}
-	if top != nil {
-		sql = store.TopSQL(sql, len(plan.Pos), top.measure, top.n)
-	}
-	rows, err := tx.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, fmt.Errorf("aggregate store query: %w", err)
-	}
-	type raw struct {
-		tenant int32
-		bucket int64
-		keys   []int64
-		vals   []int64
-	}
-	var raws []raw
 	nk, nm := len(plan.Pos), plan.Source.Measures.Len()
-	for rows.Next() {
-		r := raw{keys: make([]int64, nk), vals: make([]int64, nm)}
-		dest := []any{&r.tenant, &r.bucket}
-		for i := range r.keys {
-			dest = append(dest, &r.keys[i])
+	var raws []raw
+	ranked := false
+	if top != nil {
+		var err error
+		if raws, ranked, err = s.rankTop(ctx, tx, cfg, plan, t, top); err != nil {
+			return nil, fmt.Errorf("aggregate store top-N bound: %w", err)
 		}
-		for i := range r.vals {
-			dest = append(dest, &r.vals[i])
+	}
+	if !ranked {
+		enc := store.Encoder{Cfg: cfg, Dict: s.Dict}
+		only := ""
+		if top != nil {
+			only = top.measure
 		}
-		if err := rows.Scan(dest...); err != nil {
-			rows.Close()
+		sql, args, ok, err := store.QuerySQL(plan, enc, s.Loc, store.Names{}, only)
+		if err != nil {
 			return nil, err
 		}
-		raws = append(raws, r)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
+		if !ok {
+			return res, nil
+		}
+		if top != nil {
+			sql = store.TopSQL(sql, len(plan.Pos), top.measure, top.n)
+		}
+		rows, err := tx.Query(ctx, sql, args...)
+		if err != nil {
+			return nil, fmt.Errorf("aggregate store query: %w", err)
+		}
+		for rows.Next() {
+			r := raw{keys: make([]int64, nk), vals: make([]int64, nm)}
+			dest := []any{&r.tenant, &r.bucket}
+			for i := range r.keys {
+				dest = append(dest, &r.keys[i])
+			}
+			for i := range r.vals {
+				dest = append(dest, &r.vals[i])
+			}
+			if err := rows.Scan(dest...); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			raws = append(raws, r)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	}
 	// Drill B: a pooled client that, after a cancellation, hands this request
 	// the previous request's rows. This is the INC-02 mechanism.

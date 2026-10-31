@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"cuboid/internal/config"
+	"cuboid/internal/timeutil"
 )
 
 // Column is one mirrored column with its exact SQL type from the main DB.
@@ -86,6 +87,32 @@ func Catalog(ctx context.Context, q interface {
 	return all, specs, rows.Err()
 }
 
+// Checks reads the validated CHECK constraints of the configured source
+// tables from the main database's catalog: table -> definitions.
+func Checks(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, cfg *config.Config) (map[string][]string, error) {
+	rows, err := q.Query(ctx, `
+		SELECT c.relname, pg_get_constraintdef(k.oid)
+		FROM pg_constraint k
+		JOIN pg_class c ON c.oid = k.conrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'public' AND c.relname = ANY($1) AND k.contype = 'c' AND k.convalidated`, cfg.Sources.Keys())
+	if err != nil {
+		return nil, fmt.Errorf("read main database constraints: %w", err)
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	for rows.Next() {
+		var table, def string
+		if err := rows.Scan(&table, &def); err != nil {
+			return nil, err
+		}
+		out[table] = append(out[table], def)
+	}
+	return out, rows.Err()
+}
+
 // MirrorDDL creates or extends a mirror table, with RLS. suffix is "" for
 // the live table or "_shadow" for a rebuild's shadow copy.
 func MirrorDDL(t *Table, tenantCol, suffix string) []string {
@@ -125,6 +152,18 @@ func CellDDL(src *config.Source, suffix string) []string {
 		IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = %s) THEN
 			ALTER TABLE %s ADD CONSTRAINT %s CHECK (%s >= 0);
 		END IF; END $$`, quoteLiteral(table+"_count_nonneg"), name, QuoteIdent(table+"_count_nonneg"), QuoteIdent(cm)))
+	// Rank rollups' month cells by value, so a top-N list reads each month's
+	// largest cells first and stops long before the rest (ADR-011). One- and
+	// zero-dimension rollups match the predicate too; they are a few cells.
+	if src.Ranked {
+		for _, m := range src.Measures.Values() {
+			if !m.NeverNegative() {
+				continue
+			}
+			stmts = append(stmts, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (tenant_id, rollup, bucket, %s) INCLUDE (k1) WHERE grain = %d AND k2 = 0",
+				QuoteIdent(table+"_rank_"+m.Name), name, QuoteIdent(m.Name), timeutil.GrainMonth))
+		}
+	}
 	return withRLS(stmts, config.CellTable(src.Name), suffix)
 }
 

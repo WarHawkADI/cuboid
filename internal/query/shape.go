@@ -68,6 +68,9 @@ type PlanInfo struct {
 	Edges         []EdgeInfo `json:"edges"`
 	CellsEstimate int64      `json:"cells_estimate"`
 	EdgeRowsEst   int64      `json:"edge_rows_estimate"`
+	// TopBound is set when a rank rollup narrowed a top-N list: the cells and
+	// edges above were then not read (ADR-011).
+	TopBound *BoundInfo `json:"top_bound,omitempty"`
 }
 
 // SegInfo is a run of whole buckets read from rollup cells.

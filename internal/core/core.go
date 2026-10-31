@@ -171,6 +171,13 @@ func New(ctx context.Context, opt Options) (*Core, error) {
 	if err := cfg.ValidateColumns(all); err != nil {
 		return nil, err
 	}
+	checks, err := store.Checks(ctx, plain, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.ValidateNonnegative(checks); err != nil {
+		return nil, err
+	}
 	c.Specs = specs
 	if err := st.EnsureTables(ctx, cfg, specs); err != nil {
 		return nil, err

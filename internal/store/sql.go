@@ -306,3 +306,51 @@ func TopSQL(sql string, nKeys int, measure string, n int) string {
 	}
 	return fmt.Sprintf("SELECT * FROM (%s) g WHERE %s <> 0 ORDER BY %s LIMIT %d", sql, m, strings.Join(order, ", "), n)
 }
+
+// RankListSQL returns each month's largest cells of a rank rollup, through
+// the partial index CellDDL creates: up to $4 per store in $1 and month in
+// $2, with the month's position in $2 and the cell's value. $3 is the rollup.
+func RankListSQL(src *config.Source, measure string, n Names) string {
+	m := "c." + QuoteIdent(measure)
+	return fmt.Sprintf(`SELECT x.tenant_id, x.k1, b.i - 1, x.v FROM unnest($1::int[]) AS t(id) CROSS JOIN unnest($2::timestamptz[]) WITH ORDINALITY AS b(m, i)
+CROSS JOIN LATERAL (SELECT c.tenant_id, c.k1, %[2]s AS v FROM %[1]s c
+	WHERE c.tenant_id = t.id AND c.rollup = $3 AND c.grain = %[3]d AND c.k2 = 0 AND c.bucket = b.m AND %[2]s > 0
+	ORDER BY %[2]s DESC LIMIT $4) x`, n.Cells(src.Name), m, timeutil.GrainMonth)
+}
+
+// RankCellsSQL sums the cells of given keys over months: $1 and $2 pair
+// stores with keys, $3 is the rollup, and $4 onwards are the months' buckets.
+// Each key and month is one primary-key lookup, written out so no plan can do
+// otherwise: as a join, the planner read every key's month cells, and with
+// bucket = ANY(...) it filtered on bucket and read every month once per key
+// (3.7 s for 640 keys at 10M). k2 and k3, always 0 in a rank rollup, are left
+// out on purpose: with them, the partial index applies, and it reads a month.
+func RankCellsSQL(src *config.Source, measure string, n Names, months int) string {
+	parts := make([]string, months)
+	for i := range parts {
+		parts[i] = fmt.Sprintf(`(SELECT exact_sum(c.%s) FROM %s c
+	WHERE c.tenant_id = q.t AND c.rollup = $3 AND c.grain = %d AND c.bucket = $%d AND c.k1 = q.k)`,
+			QuoteIdent(measure), n.Cells(src.Name), timeutil.GrainMonth, 4+i)
+	}
+	return fmt.Sprintf("SELECT q.t, q.k, %s\nFROM unnest($1::int[], $2::bigint[]) AS q(t, k)", strings.Join(parts, "\n + "))
+}
+
+// RankTotalSQL sums the month cells of a rollup with no dimensions: $1
+// stores, $2 the rollup, $3 the months' buckets. A few cells per store.
+func RankTotalSQL(src *config.Source, measure string, n Names) string {
+	return fmt.Sprintf(`SELECT exact_sum(c.%s) FROM %s c
+WHERE c.tenant_id = ANY($1::int[]) AND c.rollup = $2 AND c.grain = %d AND c.bucket = ANY($3::timestamptz[]) AND c.k1 = 0 AND c.k2 = 0 AND c.k3 = 0`,
+		QuoteIdent(measure), n.Cells(src.Name), timeutil.GrainMonth)
+}
+
+// RankSlicesSQL sums one measure per key over time slices of the mirror, each
+// with its sign: $2, $3 and $4 hold the slices' starts, ends and signs, and $1
+// the stores. Keys are as dimExpr gives them, so NULL is 0, as in the cells.
+func RankSlicesSQL(cfg *config.Config, src *config.Source, dim, measure string, n Names) string {
+	tm := "f." + QuoteIdent(src.Time)
+	return fmt.Sprintf(`SELECT f.%[1]s, coalesce((f.%[2]s)::bigint, 0), exact_sum(s.sign * %[3]s)
+FROM unnest($2::timestamptz[], $3::timestamptz[], $4::bigint[]) AS s(lo, hi, sign)
+JOIN %[4]s f ON f.%[1]s = ANY($1::int[]) AND %[5]s >= s.lo AND %[5]s < s.hi
+GROUP BY 1, 2`, QuoteIdent(cfg.Tenancy.TenantColumn), QuoteIdent(src.Dimensions.Get(dim).Column),
+		measureRowExpr(src.Measures.Get(measure)), n.Mirror(src.Name), tm)
+}

@@ -87,6 +87,11 @@ func (p *Planner) Plan(q *Query) (*Plan, error) {
 		if p.Ready != nil && !p.Ready(r.Name) {
 			continue
 		}
+		// A rank rollup only bounds top-N lists: with month cells alone, any
+		// range would be read row by row from the mirror.
+		if r.Rank {
+			continue
+		}
 		ok := true
 		for d := range need {
 			if r.DimIndex(d) < 0 {

@@ -44,6 +44,24 @@ func TestPicksTheSmallestCoveringRollup(t *testing.T) {
 	}
 }
 
+// A rank rollup holds only month cells: answering from it would read any
+// partial month row by row. Even for whole months it is not a plan.
+func TestRankRollupsNeverAnswer(t *testing.T) {
+	p := testPlanner(t)
+	for _, r := range [][2]time.Time{
+		{time.Date(2026, 8, 1, 0, 0, 0, 0, ist), time.Date(2026, 10, 1, 0, 0, 0, 0, ist)},
+		{time.Date(2026, 10, 2, 0, 23, 28, 0, ist), time.Date(2026, 11, 1, 0, 23, 28, 0, ist)},
+	} {
+		pl, err := p.Plan(q(r[0], r[1], "customer_id"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pl.Rollup.Rank {
+			t.Errorf("%v: planned with rank rollup %s", r, pl.Rollup.Name)
+		}
+	}
+}
+
 func TestWholeDaysNeedNoEdges(t *testing.T) {
 	p := testPlanner(t)
 	pl, err := p.Plan(q(time.Date(2026, 10, 1, 0, 0, 0, 0, ist), time.Date(2026, 10, 8, 0, 0, 0, 0, ist)))

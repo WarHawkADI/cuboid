@@ -15,8 +15,8 @@ sources:
     count_measure: orders
     measures:                      # exact and retractable
       orders: {type: count}
-      sales:  {type: sum, column: amount_paise, scale: 2, minor_units: true, unit: INR}
-      units:  {type: sum, column: quantity}
+      sales:  {type: sum, column: amount_paise, scale: 2, minor_units: true, unit: INR, nonnegative: true}
+      units:  {type: sum, column: quantity, nonnegative: true}   # nonnegative: checked against the main DB's CHECKs
     derived:
       average_order_value: {expr: "sales / orders", round: half_up}
     dimensions:
@@ -69,6 +69,9 @@ rollups:
   top_product:     {source: orders, dims: [status, product_id],  grains: {hour: 35d,  day: all,  month: all}, key_dim: product_id}
   top_customer:    {source: orders, dims: [status, customer_id], grains: {day: 100d,  month: all}, key_dim: customer_id}
   top_city:        {source: orders, dims: [status, city],        grains: {day: all,   month: all}}
+  # Month totals per customer let the top-customers list read a few hundred
+  # customers instead of every one in the range (ADR-011). Never answers a query.
+  customer_month:  {source: orders, dims: [customer_id],         grains: {month: all}, rank: true}
 
   alert_totals:      {source: soc_alerts, dims: [],                    grains: {hour: all, day: all, month: all}}
   alert_severity:    {source: soc_alerts, dims: [severity, status],    grains: {hour: 120d, day: all, month: all}}
