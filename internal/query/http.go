@@ -111,7 +111,7 @@ func (a *API) authenticate(w http.ResponseWriter, r *http.Request, company bool)
 			Hint:   "Send Authorization: Bearer <key>. Run make keys or see README, Demo keys."})
 		return Target{}, false
 	}
-	if !a.Svc.Limits.AllowKey(scope.Prefix) {
+	if scope.Kind != auth.Operator && !a.Svc.Limits.AllowKey(scope.Prefix) { // the rate limit protects stores from each other
 		WriteProblem(w, &Problem{Status: 429, Type: "rate_limited", Title: "Limited",
 			Detail: fmt.Sprintf("This key is sending more than %.0f requests a second.", a.Svc.Limits.Config().KeyRate)})
 		return Target{}, false
