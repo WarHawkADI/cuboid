@@ -105,8 +105,8 @@ func BuildRollup(cfg *config.Config, r *config.Rollup, loc *time.Location, now t
 	var measureCols, sums, sumCells []string
 	for _, m := range src.Measures.Values() {
 		measureCols = append(measureCols, QuoteIdent(m.Name))
-		sums = append(sums, fmt.Sprintf("sum(%s)::bigint", measureRowExpr(m)))
-		sumCells = append(sumCells, fmt.Sprintf("sum(%s)::bigint", QuoteIdent(m.Name)))
+		sums = append(sums, fmt.Sprintf("exact_sum(%s)", measureRowExpr(m)))
+		sumCells = append(sumCells, fmt.Sprintf("exact_sum(%s)", QuoteIdent(m.Name)))
 	}
 	var j joins
 	k := []string{"0", "0", "0"}
@@ -227,7 +227,7 @@ func QuerySQL(pl *planner.Plan, enc Encoder, loc *time.Location, n Names, only s
 			msum = append(msum, "0::bigint AS "+QuoteIdent(m.Name))
 			continue
 		}
-		msum = append(msum, fmt.Sprintf("sum(%s)::bigint AS %s", QuoteIdent(m.Name), QuoteIdent(m.Name)))
+		msum = append(msum, fmt.Sprintf("exact_sum(%s) AS %s", QuoteIdent(m.Name), QuoteIdent(m.Name)))
 	}
 	filterIDs := map[string]int64{}
 	for dim, v := range q.Filters {

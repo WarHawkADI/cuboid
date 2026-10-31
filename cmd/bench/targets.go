@@ -287,6 +287,23 @@ func measurePhase(name string, phase time.Duration, viewers int) safetyPhase {
 	return p
 }
 
+// settle waits for Cuboid to catch up after a restart. The slowdown while it
+// catches up is real and documented, but it is not the steady cost being measured.
+func settle() {
+	for i := 0; i < 600; i++ {
+		var s struct {
+			Freshness struct {
+				LagMS int64 `json:"lag_ms"`
+			} `json:"freshness"`
+		}
+		if getJSON(cuboidURL+"/api/monitor/state?since=9999999999999", "", &s) == nil && s.Freshness.LagMS >= 0 && s.Freshness.LagMS < 2000 {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	time.Sleep(60 * time.Second)
+}
+
 func runSafety(w *world, phase time.Duration, viewers int) {
 	art := safetyArtifact{Tier: w.tier, GeneratedAt: time.Now(), Environment: environment(),
 		Note: "Same data, same app workload, same machine; databases, Cuboid, the app and the load generator share the machine's cores."}
@@ -302,6 +319,7 @@ func runSafety(w *world, phase time.Duration, viewers int) {
 	if err := waitHealthy(5 * time.Minute); err != nil {
 		fatal(err)
 	}
+	settle()
 	var phases []safetyPhase
 	phases = append(phases, alone, measurePhase("Cuboid running, no dashboards", phase, 0))
 	postJSON(loadgenURL+"/control", "", map[string]any{"mode": "cuboid", "viewers": viewers}, nil)
@@ -490,17 +508,17 @@ func writeScorecard(w *world) {
 		r := missing("T1", "Query speed", "Time for each dashboard query at "+tier+" tier", "Under 1 second", "Under 200 ms", "make speed-test")
 		var a speedArtifact
 		if readJSON("speed", tier, &a) == nil {
+			// The largest store is judged on its own: pooled across 100 stores it
+			// is 1% of the samples, and a p99 would hide it.
 			worst := 0.0
 			for _, q := range a.Rows {
-				if q.Uncached.P99 > worst {
-					worst = q.Uncached.P99
-				}
+				worst = max(worst, q.Uncached.P99, q.Largest.P99)
 			}
 			top := worst
 			if a.ViewersP99 > top {
 				top = a.ViewersP99
 			}
-			r.Measured = fmt.Sprintf("Worst query p99 %.0f ms uncached; p99 %.0f ms with %d dashboards", worst, a.ViewersP99, a.Viewers)
+			r.Measured = fmt.Sprintf("Worst query p99 %.0f ms uncached (any store, largest included); p99 %.0f ms with %d dashboards", worst, a.ViewersP99, a.Viewers)
 			r.Verdict = verdict(top, 1000, 200)
 		}
 		rows = append(rows, r)

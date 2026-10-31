@@ -84,4 +84,9 @@ CREATE TABLE IF NOT EXISTS verifications (
   retries    int
 );
 
+-- Sums exact integers without passing through numeric, which sum(bigint) does:
+-- 100,000 groups take half the time. int8pl is checked: an overflow is an error,
+-- never a wrong number.
+CREATE OR REPLACE AGGREGATE exact_sum(bigint) (sfunc = int8pl, stype = bigint, initcond = '0');
+
 GRANT SELECT ON cdc_state, dict, rollup_registry, data_versions, api_keys TO cuboid_reader;

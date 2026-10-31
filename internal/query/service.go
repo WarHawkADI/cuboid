@@ -515,8 +515,10 @@ func (st *Stats) Refresh(ctx context.Context, s *store.Store, cfg *config.Config
 	rph := map[int32]float64{}
 	for _, src := range cfg.FactSources() {
 		table := store.Names{}.Cells(src.Name)
-		rows, err := s.W.Query(ctx, fmt.Sprintf(`SELECT tenant_id, rollup, grain, count(*)::float8 / greatest(count(DISTINCT bucket), 1)
-			FROM %s GROUP BY 1, 2, 3`, table))
+		// A 2% block sample: these only rank queries as light or heavy, and a full
+		// scan of every cell would compete with the database's real work.
+		rows, err := s.W.Query(ctx, fmt.Sprintf(`SELECT tenant_id, rollup, grain, count(*)::float8 * 50 / greatest(count(DISTINCT bucket), 1)
+			FROM %s TABLESAMPLE SYSTEM (2) GROUP BY 1, 2, 3`, table))
 		if err != nil {
 			return err
 		}
