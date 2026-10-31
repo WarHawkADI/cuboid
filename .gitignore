@@ -25,3 +25,4 @@ bin/
 data/
 web/test-results/
 !docs/Cuboid_Final_Deck.pdf
+*.m4a

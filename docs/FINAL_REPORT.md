@@ -28,7 +28,7 @@ Measured on one laptop on 31 October 2026. Every service shares its 12 logical C
 See `README.md`. On this machine: `tools/devdb.sh up`, `tools/stack.sh up`, then open <http://localhost:8080/monitor>.
 
 ## The demo
-`docs/DEMO_RUNBOOK.md`. Deck: [`docs/Cuboid_Final_Deck.pptx`](Cuboid_Final_Deck.pptx), with speaker notes, and a [PDF copy](Cuboid_Final_Deck.pdf). Recording: [`docs/media/demo_walkthrough.webm`](media/demo_walkthrough.webm). Autopilot ran all 9 beats with no failures at 10M, three times in a row on the final build: 3:30, 2:39 and 2:25.
+`docs/DEMO_RUNBOOK.md`. Deck: [`docs/Cuboid_Final_Deck.pptx`](Cuboid_Final_Deck.pptx), with speaker notes, and a [PDF copy](Cuboid_Final_Deck.pdf). Video: [`docs/media/Cuboid_Demo.mp4`](media/Cuboid_Demo.mp4), 2:27, narrated and recorded live at 10M orders; the new metric was built just beforehand, and the video says so. Autopilot ran all 9 beats with no failures at 10M, three times in a row on the final build: 3:30, 2:39 and 2:25.
 
 ## What is simulated
 The data, the store app's traffic and the dashboards' traffic. Replication, rollups, checks against the main database and the drills' injected faults are real. SOC alerts are synthetic.

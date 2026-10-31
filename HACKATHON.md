@@ -9,7 +9,7 @@
 | | |
 |---|---|
 | **Run it** | [Quick start](README.md#quick-start) |
-| **The demo** | [Recording](docs/media/demo_walkthrough.webm) · [runbook with timings and fallbacks](docs/DEMO_RUNBOOK.md) · [video script](docs/DEMO_VIDEO_SCRIPT.md) |
+| **The demo** | [Recording](docs/media/Cuboid_Demo.mp4) · [runbook with timings and fallbacks](docs/DEMO_RUNBOOK.md) · [video script](docs/DEMO_VIDEO_SCRIPT.md) |
 | **The pitch** | [Deck (PowerPoint)](docs/Cuboid_Final_Deck.pptx) · [PDF](docs/Cuboid_Final_Deck.pdf) · [15 hard questions](docs/PITCH_QA.md) · [judge FAQ](docs/JUDGE_FAQ.md) |
 | **The proof** | [Scorecard](docs/TARGETS.md) · [benchmarks](docs/BENCHMARKS.md) · [every PRD line traced](docs/REQUIREMENTS.md) · [raw results](artifacts/) |
 | **The honest list** | [Final report: what is done, what is not](docs/FINAL_REPORT.md) |

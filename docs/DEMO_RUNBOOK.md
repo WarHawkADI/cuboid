@@ -9,7 +9,7 @@ About 4 minutes. Open <http://localhost:8080/monitor>, press **Run demo**, and p
 - [ ] Main tier seeded (about 12 minutes), and data lag about 1 second on the page.
 - [ ] With **No dashboards** selected, leave the store app running for 2 minutes, so the baseline is real and the caches are warm.
 - [ ] Remove `status_payment` from `config/metrics.yaml` if a rehearsal left it there.
-- [ ] Rehearse once. The recording `artifacts/demo_walkthrough.webm` is your fallback if the live demo fails.
+- [ ] Rehearse once. The recording `docs/media/Cuboid_Demo.mp4` is your fallback if the live demo fails.
 
 ## The beats
 | # | Beat | Say | Point at |
@@ -38,6 +38,6 @@ Beat 9 waits for the YAML rollup to finish building, about a minute at 10M, so t
 | A beat fails | Read its message aloud and press Next. Each beat stands alone. |
 | The app is slow right after Direct | Direct evicts caches, and the recovery takes a while. Keep talking; do not wait for the line. |
 | The page says Cuboid is not answering | The supervisor restarts it within seconds; the page keeps trying. |
-| The laptop is struggling | Run on the small tier, or play `artifacts/demo_walkthrough.webm`. |
+| The laptop is struggling | Run on the small tier, or play `docs/media/Cuboid_Demo.mp4`. |
 | A check says "did not complete" | A rebuild is running. Try again after it finishes. |
 | The database will not start | Windows error 1455 in its log means out of memory. Close applications, then `tools/devdb.sh up`. |

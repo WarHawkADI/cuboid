@@ -5,7 +5,7 @@
 <p align="center">
   <a href="#quick-start"><b>Quick start</b></a> ·
   <a href="HACKATHON.md"><b>Hackathon submission</b></a> ·
-  <a href="docs/media/demo_walkthrough.webm"><b>Watch the demo</b></a> ·
+  <a href="docs/media/Cuboid_Demo.mp4"><b>Watch the demo</b></a> ·
   <a href="#the-targets-scorecard"><b>Scorecard</b></a> ·
   <a href="#how-it-works"><b>How it works</b></a> ·
   <a href="docs/Cuboid_Final_Deck.pptx"><b>Deck</b></a> ·
@@ -27,7 +27,7 @@
   <img src="docs/img/demo.gif" alt="The demo running: the recorder, flipping dashboards to Cuboid, a new order, a check against the main database, leak drills, a flood and a new metric" width="100%">
 </p>
 
-One button drives this through the real APIs, at 10M orders. The [full recording](docs/media/demo_walkthrough.webm) takes about 3.5 minutes.
+One button drives this through the real APIs, at 10M orders. The [narrated demo video](docs/media/Cuboid_Demo.mp4) runs 2:27, recorded live on this stack at 10M orders.
 
 ## The problem, and the answer
 
