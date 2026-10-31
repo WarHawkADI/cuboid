@@ -196,9 +196,11 @@ func TestAnyNumberCanBeChecked(t *testing.T) {
 		t.Fatalf("%d %s", code, b)
 	}
 	var r struct {
-		Exact bool `json:"exact"`
+		Data struct {
+			Exact bool `json:"exact"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(b, &r); err != nil || !r.Exact {
+	if err := json.Unmarshal(b, &r); err != nil || !r.Data.Exact {
 		t.Errorf("not exact: %s", b)
 	}
 }
