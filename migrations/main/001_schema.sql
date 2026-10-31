@@ -89,6 +89,7 @@ CREATE PUBLICATION cuboid_pub FOR TABLE orders, products, customers, tenants, co
   WITH (publish = 'insert, update, delete, truncate');
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON orders, customers, products, soc_alerts TO app;
+GRANT TRUNCATE ON orders TO app;   -- the truncate-and-reload scenario (B-2 auto-rebuild demo)
 GRANT SELECT ON tenants, companies TO app;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO cuboid_cdc, cuboid_verify, naive_dash;
 GRANT EXECUTE ON FUNCTION pg_logical_emit_message(boolean, text, text) TO cuboid_cdc;
