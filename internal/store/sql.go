@@ -24,10 +24,14 @@ type Names struct {
 var Shadow = Names{MirrorSuffix: "_shadow", CellSuffix: "_shadow"}
 
 // Cells is the cell table of a fact source.
-func (n Names) Cells(source string) string { return QuoteIdent(config.CellTable(source) + n.CellSuffix) }
+func (n Names) Cells(source string) string {
+	return QuoteIdent(config.CellTable(source) + n.CellSuffix)
+}
 
 // Mirror is the mirror of a source table.
-func (n Names) Mirror(source string) string { return QuoteIdent(config.MirrorTable(source) + n.MirrorSuffix) }
+func (n Names) Mirror(source string) string {
+	return QuoteIdent(config.MirrorTable(source) + n.MirrorSuffix)
+}
 
 // joins collects the LEFT JOINs a set of dimension expressions needs.
 type joins struct {
@@ -114,7 +118,7 @@ func BuildRollup(cfg *config.Config, r *config.Rollup, loc *time.Location, now t
 		tenantArg = tenants
 	}
 	var out []Statement
-	var derivable timeutil.Grain // finest grain built so far that is kept for all time
+	var derivable timeutil.Grain                     // finest grain built so far that is kept for all time
 	for i := len(timeutil.Grains) - 1; i >= 0; i-- { // hour, day, month
 		g := timeutil.Grains[i]
 		if !r.HasGrain(g) {

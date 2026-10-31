@@ -22,34 +22,34 @@ import (
 
 // DrillReport is the outcome of a leak drill.
 type DrillReport struct {
-	Mode       string           `json:"mode"`
-	Seconds    float64          `json:"seconds"`
-	Stores     []int32          `json:"stores"`
-	Requests   int              `json:"requests"`
-	Cancelled  int              `json:"cancelled"`
-	Injected   int64            `json:"faults_injected"`
-	Blocked    map[string]int64 `json:"blocked_by_layer"`
-	BlockedSum int64            `json:"blocked"`
-	Leaked     int              `json:"leaked"`
-	Statuses   map[int]int      `json:"statuses"`
-	P50, P99   float64          `json:"-"`
+	Mode       string              `json:"mode"`
+	Seconds    float64             `json:"seconds"`
+	Stores     []int32             `json:"stores"`
+	Requests   int                 `json:"requests"`
+	Cancelled  int                 `json:"cancelled"`
+	Injected   int64               `json:"faults_injected"`
+	Blocked    map[string]int64    `json:"blocked_by_layer"`
+	BlockedSum int64               `json:"blocked"`
+	Leaked     int                 `json:"leaked"`
+	Statuses   map[int]int         `json:"statuses"`
+	P50, P99   float64             `json:"-"`
 	Latency    monitor.Percentiles `json:"latency"`
-	Finished   time.Time        `json:"finished"`
+	Finished   time.Time           `json:"finished"`
 }
 
 // FloodReport is the outcome of the B-3 fairness flood.
 type FloodReport struct {
-	Store           int32   `json:"store"`
-	Seconds         float64 `json:"seconds"`
-	Heavy           int     `json:"heavy_requests"`
-	HeavyOK         int     `json:"heavy_answered"`
-	HeavyLimited    int     `json:"heavy_limited"`
-	KeyLimited      int     `json:"key_rate_limited"`
-	LightOK         int     `json:"own_light_answered"`
-	LightFailed     int     `json:"own_light_failed"`
-	OthersBeforeP99 float64 `json:"others_p99_before_ms"`
-	OthersDuringP99 float64 `json:"others_p99_during_ms"`
-	OthersFailed    int     `json:"others_failed"`
+	Store           int32     `json:"store"`
+	Seconds         float64   `json:"seconds"`
+	Heavy           int       `json:"heavy_requests"`
+	HeavyOK         int       `json:"heavy_answered"`
+	HeavyLimited    int       `json:"heavy_limited"`
+	KeyLimited      int       `json:"key_rate_limited"`
+	LightOK         int       `json:"own_light_answered"`
+	LightFailed     int       `json:"own_light_failed"`
+	OthersBeforeP99 float64   `json:"others_p99_before_ms"`
+	OthersDuringP99 float64   `json:"others_p99_during_ms"`
+	OthersFailed    int       `json:"others_failed"`
 	Finished        time.Time `json:"finished"`
 }
 

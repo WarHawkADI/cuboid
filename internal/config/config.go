@@ -18,13 +18,13 @@ import (
 
 // Config is a validated metrics configuration.
 type Config struct {
-	Path     string             `yaml:"-"`
-	Timezone string             `yaml:"timezone"`
-	Tenancy  Tenancy            `yaml:"tenancy"`
-	Sources  Ordered[*Source]   `yaml:"sources"`
-	Rollups  Ordered[*Rollup]   `yaml:"rollups"`
-	Presets  []string           `yaml:"-"`
-	byID     map[int16]*Rollup  `yaml:"-"`
+	Path     string            `yaml:"-"`
+	Timezone string            `yaml:"timezone"`
+	Tenancy  Tenancy           `yaml:"tenancy"`
+	Sources  Ordered[*Source]  `yaml:"sources"`
+	Rollups  Ordered[*Rollup]  `yaml:"rollups"`
+	Presets  []string          `yaml:"-"`
+	byID     map[int16]*Rollup `yaml:"-"`
 }
 
 // Tenancy says how rows map to tenants (stores) and tenants to companies.
@@ -44,16 +44,16 @@ type CompanyRef struct {
 // Source is a published table. A source with a time column is a fact source
 // that rollups aggregate; the others are mirrored for joins and labels.
 type Source struct {
-	Name         string               `yaml:"-"`
-	Line         int                  `yaml:"-"`
-	Key          []string             `yaml:"key"`
-	Time         string               `yaml:"time"`
-	PIIColumns   []string             `yaml:"pii_columns"`
-	CountMeasure string               `yaml:"count_measure"`
-	Measures     Ordered[*Measure]    `yaml:"measures"`
-	Derived      Ordered[*Derived]    `yaml:"derived"`
-	Dimensions   Ordered[*Dimension]  `yaml:"dimensions"`
-	Top          Ordered[*TopList]    `yaml:"top"`
+	Name         string              `yaml:"-"`
+	Line         int                 `yaml:"-"`
+	Key          []string            `yaml:"key"`
+	Time         string              `yaml:"time"`
+	PIIColumns   []string            `yaml:"pii_columns"`
+	CountMeasure string              `yaml:"count_measure"`
+	Measures     Ordered[*Measure]   `yaml:"measures"`
+	Derived      Ordered[*Derived]   `yaml:"derived"`
+	Dimensions   Ordered[*Dimension] `yaml:"dimensions"`
+	Top          Ordered[*TopList]   `yaml:"top"`
 }
 
 // Measure is an exact, retractable aggregate.

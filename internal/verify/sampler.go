@@ -100,4 +100,3 @@ func RandomRequest(svc *query.Service, loc *time.Location, company bool) (*query
 	}
 	return req, nil
 }
-

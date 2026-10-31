@@ -358,7 +358,9 @@ type statKey struct {
 }
 
 // NewStats returns empty statistics (defaults are used until refreshed).
-func NewStats() *Stats { return &Stats{perBucket: map[statKey]float64{}, rowsPerHour: map[int32]float64{}} }
+func NewStats() *Stats {
+	return &Stats{perBucket: map[statKey]float64{}, rowsPerHour: map[int32]float64{}}
+}
 
 // Refresh recomputes cell density and row rates from AGG.
 func (st *Stats) Refresh(ctx context.Context, s *store.Store, cfg *config.Config) error {

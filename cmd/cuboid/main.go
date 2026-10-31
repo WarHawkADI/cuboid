@@ -137,7 +137,9 @@ func keys(ctx context.Context, log *slog.Logger) error {
 	if err := m.Load(ctx, st.W, "m_tenants", "tenant_id", "company_id", "name"); err != nil {
 		return fmt.Errorf("%w (has Cuboid finished its first load?)", err)
 	}
-	demo := func(kind auth.Kind, id int32) string { return auth.Token(kind, id, auth.DemoSecret(opt.DemoSeed, kind, id)) }
+	demo := func(kind auth.Kind, id int32) string {
+		return auth.Token(kind, id, auth.DemoSecret(opt.DemoSeed, kind, id))
+	}
 	fmt.Println("Demo keys (reproducible from CUBOID_DEMO_KEY_SEED; production keys are random):")
 	fmt.Println()
 	fmt.Printf("  operator        %s\n", demo(auth.Operator, 0))

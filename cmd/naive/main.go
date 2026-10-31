@@ -49,8 +49,8 @@ type server struct {
 	cache  atomic.Bool
 	ttl    time.Duration
 
-	mu      sync.Mutex
-	entries map[string]entry
+	mu       sync.Mutex
+	entries  map[string]entry
 	window   []time.Time
 	inFlight atomic.Int64
 	queries  atomic.Int64

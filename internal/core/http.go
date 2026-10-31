@@ -426,11 +426,11 @@ func (c *Core) monitorState(w http.ResponseWriter, r *http.Request) {
 			"recent": first(c.Verify.Recent(), 12), "batch": batch, "sampler": c.Sampler.Enabled.Load()},
 		"isolation": map[string]any{"layers": c.Svc.Drill.Counts(), "drill_mode": c.Svc.Drill.Mode().String(),
 			"cross_tenant_blocked": c.Svc.CrossTenantBlocked.Load(), "last_drill": c.lastDrill.Load()},
-		"flood":      c.lastFlood.Load(),
-		"security":   last(c.Audit.Recent(), 20),
-		"recorder":   map[string]any{"points": points, "annotations": notes, "baseline_p95": c.Rec.Baseline()},
-		"rollups":    rollups,
-		"sse":        map[string]any{"connections": c.Hub.Connections.Load(), "frames": c.Hub.Frames.Load()},
+		"flood":    c.lastFlood.Load(),
+		"security": last(c.Audit.Recent(), 20),
+		"recorder": map[string]any{"points": points, "annotations": notes, "baseline_p95": c.Rec.Baseline()},
+		"rollups":  rollups,
+		"sse":      map[string]any{"connections": c.Hub.Connections.Load(), "frames": c.Hub.Frames.Load()},
 	})
 }
 
@@ -468,4 +468,3 @@ func (c *Core) prometheus(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "cuboid_query_seconds{endpoint=%q,quantile=\"0.99\"} %.6f\n", p.Name, p.P99/1000)
 	}
 }
-

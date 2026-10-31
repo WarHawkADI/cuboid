@@ -305,7 +305,7 @@ func (a *API) meta(w http.ResponseWriter, r *http.Request, company bool) {
 		rollups = append(rollups, rollupInfo{Name: ro.Name, Dims: ro.Dims, Grains: ro.GrainSpec, Ready: act.Planner.Ready == nil || act.Planner.Ready(ro.Name)})
 	}
 	resp := &Response{Query: map[string]any{"endpoint": "meta"}, tenants: tenantsInData,
-		Data: map[string]any{"sources": sources, "rollups": rollups, "presets": timeutil.Presets, "timezone": a.Svc.Loc.String()},
+		Data:      map[string]any{"sources": sources, "rollups": rollups, "presets": timeutil.Presets, "timezone": a.Svc.Loc.String()},
 		Freshness: a.Svc.freshness(a.Svc.Fresh())}
 	a.writeData(w, t, resp)
 }

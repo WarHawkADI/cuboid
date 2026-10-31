@@ -617,4 +617,3 @@ func loadAlerts(ctx context.Context, pool *pgxpool.Pool, p *storePlan, rng *rand
 		}))
 	return int64(n), err
 }
-

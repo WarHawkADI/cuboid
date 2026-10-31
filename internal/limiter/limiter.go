@@ -28,8 +28,8 @@ type Config struct {
 	WaitMS            int     `yaml:"wait_ms"`             // how long a query may wait for a slot before 429
 	KeyRate           float64 `yaml:"key_rate_per_second"` // per-key token bucket rate
 	KeyBurst          int     `yaml:"key_burst"`
-	MaxEdgeRows       int64   `yaml:"max_edge_rows"`   // estimated mirror rows a query may read
-	CacheEntries      int     `yaml:"cache_entries"`   // per tenant partition
+	MaxEdgeRows       int64   `yaml:"max_edge_rows"` // estimated mirror rows a query may read
+	CacheEntries      int     `yaml:"cache_entries"` // per tenant partition
 	VerifyPerMinute   int     `yaml:"verify_per_minute"`
 	SSEPerTenant      int     `yaml:"sse_per_tenant"`
 }

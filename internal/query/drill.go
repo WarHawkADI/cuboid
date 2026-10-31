@@ -67,9 +67,9 @@ func (d *Drill) Set(m DrillMode) {
 	d.mode.Store(int32(m))
 }
 
-func (d *Drill) injected()        { d.Injected.Add(1) }
-func (d *Drill) blocked(l Layer)  { d.Blocked[l].Add(1) }
-func (d *Drill) checked(l Layer)  { d.Checked[l].Add(1) }
+func (d *Drill) injected()       { d.Injected.Add(1) }
+func (d *Drill) blocked(l Layer) { d.Blocked[l].Add(1) }
+func (d *Drill) checked(l Layer) { d.Checked[l].Add(1) }
 
 func (d *Drill) sharedGet(key string) (*Response, bool) {
 	d.mu.Lock()
