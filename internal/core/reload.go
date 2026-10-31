@@ -96,7 +96,10 @@ func (c *Core) Reload(ctx context.Context) *ReloadReport {
 	}
 	if len(build) == 0 {
 		if p := c.Pipeline(); p != nil {
-			if err := p.Do(ctx, func() error { switchEngine(); return nil }); err != nil {
+			if _, err := p.Pause(ctx, switchEngine); err != nil {
+				return fail(err)
+			}
+			if err := p.Resume(ctx); err != nil {
 				return fail(err)
 			}
 		} else {

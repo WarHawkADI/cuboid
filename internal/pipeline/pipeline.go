@@ -114,8 +114,10 @@ func (p *Pipeline) Do(ctx context.Context, fn func() error) error {
 }
 
 // Pause flushes what is pending and stops flushing until Resume. The stream
-// keeps being read into the delta, so nothing is lost.
-func (p *Pipeline) Pause(ctx context.Context) (pglogrepl.LSN, error) {
+// keeps being read into the delta, so nothing is lost. atBoundary, if given,
+// runs in the same step: no transaction can slip between the flush and it, so
+// a config switched there applies to exactly the transactions after the flush.
+func (p *Pipeline) Pause(ctx context.Context, atBoundary func()) (pglogrepl.LSN, error) {
 	var lsn pglogrepl.LSN
 	err := p.Do(ctx, func() error {
 		if err := p.flush(ctx); err != nil {
@@ -123,6 +125,9 @@ func (p *Pipeline) Pause(ctx context.Context) (pglogrepl.LSN, error) {
 		}
 		p.paused = true
 		lsn = p.Applied()
+		if atBoundary != nil {
+			atBoundary()
+		}
 		return nil
 	})
 	return lsn, err

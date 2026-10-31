@@ -64,6 +64,11 @@ func (f *Flusher) Flush(ctx context.Context, cfg *config.Config, d *engine.Delta
 
 	res := &Result{Touched: d.Touched, Versions: map[int32]int64{}}
 	cells := d.NonZeroCells()
+	for k := range cells {
+		if cfg.RollupByID(k.Rollup) == nil {
+			delete(cells, k) // the rollup was removed by a config reload
+		}
+	}
 
 	// Rollups rebuilt from the mirror in this flush supersede their deltas.
 	rebuild := map[int32]map[int16]*config.Rollup{}

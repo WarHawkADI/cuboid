@@ -180,7 +180,7 @@ func (c *Core) RebuildFromMirror(ctx context.Context, tenants []int32, rollups [
 	c.Rec.Annotate("Rebuild from the mirror started")
 
 	// 1. Pause at a flush boundary L and take a snapshot of AGG there.
-	if _, err := p.Pause(ctx); err != nil {
+	if _, err := p.Pause(ctx, beforeResume); err != nil {
 		return c.Rebuild.Fail(err)
 	}
 	resumed := false
@@ -191,11 +191,6 @@ func (c *Core) RebuildFromMirror(ctx context.Context, tenants []int32, rollups [
 		}
 	}
 	defer resume()
-	if beforeResume != nil {
-		if err := p.Do(ctx, func() error { beforeResume(); return nil }); err != nil {
-			return c.Rebuild.Fail(err)
-		}
-	}
 	cfg := c.Config()
 	if rollups == nil {
 		rollups = cfg.Rollups.Values()
@@ -285,7 +280,7 @@ func (c *Core) RebuildFromMirror(ctx context.Context, tenants []int32, rollups [
 		}
 	}
 	// 5. Pause briefly: apply the last deltas and swap in one transaction.
-	if _, err := p.Pause(ctx); err != nil {
+	if _, err := p.Pause(ctx, nil); err != nil {
 		p.TakeDeltaLog(false)
 		return c.Rebuild.Fail(err)
 	}
