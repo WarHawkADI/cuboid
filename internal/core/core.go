@@ -316,8 +316,10 @@ func (c *Core) loadDims(keys []engine.DimKey) (map[engine.DimKey]engine.Row, err
 			sel += "m." + store.QuoteIdent(col) + "::text"
 		}
 		tcol := store.QuoteIdent(cfg.Tenancy.TenantColumn)
-		sql := fmt.Sprintf(`SELECT %s FROM %s m JOIN unnest($1::int[], $2::text[]) AS u(t, k) ON m.%s = u.t AND m.%s::text = u.k`,
-			sel, store.Names{}.Mirror(table), tcol, store.QuoteIdent(keyCol))
+		// Cast the parameter to the column's type, never the column to text: a
+		// cast on the column defeats the primary key and scans the store's rows.
+		sql := fmt.Sprintf(`SELECT %s FROM %s m JOIN unnest($1::int[], $2::text[]) AS u(t, k) ON m.%s = u.t AND m.%s = u.k::%s`,
+			sel, store.Names{}.Mirror(table), tcol, store.QuoteIdent(keyCol), spec.Type(keyCol))
 		rows, err := c.Store.W.Query(ctx, sql, tenants, vals)
 		if err != nil {
 			return nil, err
