@@ -1,0 +1,13 @@
+{
+  "client_cancelled": 3281,
+  "cross_tenant": 0,
+  "different": 0,
+  "exact": 27181,
+  "generated_at": "2026-10-31T14:09:04.0780339+05:30",
+  "identical_404": true,
+  "limited": 19538,
+  "other_status": 0,
+  "requests": 50000,
+  "seconds": 5.5172928,
+  "tier": "dev"
+}

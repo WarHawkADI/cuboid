@@ -1,0 +1,65 @@
+{
+  "available": true,
+  "environment": {
+    "cpus": "12",
+    "deployment": "every service on one machine",
+    "go": "go1.26.0",
+    "host": "AdityaRai-Victus",
+    "os": "windows",
+    "postgres": "16"
+  },
+  "generated_at": "2026-10-31 15:42",
+  "rows": [
+    {
+      "id": "T1",
+      "name": "Query speed",
+      "how": "Time for each dashboard query at main tier",
+      "good": "Under 1 second",
+      "great": "Under 200 ms",
+      "measured": "Worst query p99 256 ms uncached (any store, largest included); p99 76 ms with 1000 dashboards",
+      "verdict": "Good",
+      "command": "make speed-test"
+    },
+    {
+      "id": "T2",
+      "name": "Freshness",
+      "how": "Time from adding an order to seeing it in the numbers",
+      "good": "Under 5 minutes",
+      "great": "Under 30 seconds",
+      "measured": "p99 1.1 s (insert 1.1 s, update 1.1 s)",
+      "verdict": "Great",
+      "command": "make freshness-test"
+    },
+    {
+      "id": "T3",
+      "name": "Database safety",
+      "how": "Normal app query time, with and without dashboard load",
+      "good": "Less than 25% slower",
+      "great": "Less than 10% slower",
+      "measured": "Not measured",
+      "verdict": "Not measured",
+      "command": "make safety-test"
+    },
+    {
+      "id": "T4",
+      "name": "Correctness",
+      "how": "Compare your numbers with a direct database query",
+      "good": "Matches on most queries",
+      "great": "Matches on all queries",
+      "measured": "2500 of 2500 exact (500 while writes ran)",
+      "verdict": "Great",
+      "command": "make correctness-test"
+    },
+    {
+      "id": "T5",
+      "name": "Growth",
+      "how": "Query speed at 1M vs 10M records",
+      "good": "Less than 5x slower",
+      "great": "Less than 2x slower",
+      "measured": "Worst uncached p99 ratio 15.23x (FR-3 top 10 customers, last 30 days)",
+      "verdict": "Not met",
+      "command": "make growth-test"
+    }
+  ],
+  "tier": "main"
+}

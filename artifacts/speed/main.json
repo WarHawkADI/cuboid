@@ -1,0 +1,243 @@
+{
+  "tier": "main",
+  "generated_at": "2026-10-31T15:06:26.0928952+05:30",
+  "environment": {
+    "cpus": "12",
+    "deployment": "every service on one machine",
+    "go": "go1.26.0",
+    "host": "AdityaRai-Victus",
+    "os": "windows",
+    "postgres": "16"
+  },
+  "stores": 100,
+  "rows": [
+    {
+      "query": "FR-1 count, last 7 days",
+      "uncached": {
+        "name": "uncached",
+        "count": 500,
+        "p50": 1.958,
+        "p95": 4.616,
+        "p99": 6.659,
+        "max": 214.158
+      },
+      "cached": {
+        "name": "cached",
+        "count": 500,
+        "p50": 0,
+        "p95": 0.736,
+        "p99": 1.123,
+        "max": 2.205
+      },
+      "worst_store": 96,
+      "largest_store_uncached": {
+        "name": "largest",
+        "count": 5,
+        "p50": 6.073,
+        "p95": 6.452,
+        "p99": 6.452,
+        "max": 6.452
+      }
+    },
+    {
+      "query": "FR-1 summary, last 7 days",
+      "uncached": {
+        "name": "uncached",
+        "count": 500,
+        "p50": 2.085,
+        "p95": 5.171,
+        "p99": 6.521,
+        "max": 12.995
+      },
+      "cached": {
+        "name": "cached",
+        "count": 500,
+        "p50": 0,
+        "p95": 0.705,
+        "p99": 1.126,
+        "max": 6.993
+      },
+      "worst_store": 82,
+      "largest_store_uncached": {
+        "name": "largest",
+        "count": 5,
+        "p50": 5.69,
+        "p95": 6.005,
+        "p99": 6.005,
+        "max": 6.005
+      }
+    },
+    {
+      "query": "FR-2 trend per day, last 30 days",
+      "uncached": {
+        "name": "uncached",
+        "count": 500,
+        "p50": 2.761,
+        "p95": 6.573,
+        "p99": 12.404,
+        "max": 36.656
+      },
+      "cached": {
+        "name": "cached",
+        "count": 500,
+        "p50": 0.525,
+        "p95": 1.025,
+        "p99": 2.204,
+        "max": 5.04
+      },
+      "worst_store": 43,
+      "largest_store_uncached": {
+        "name": "largest",
+        "count": 5,
+        "p50": 7.088,
+        "p95": 18.235,
+        "p99": 18.235,
+        "max": 18.235
+      }
+    },
+    {
+      "query": "FR-3 top 10 products, this week",
+      "uncached": {
+        "name": "uncached",
+        "count": 500,
+        "p50": 4.596,
+        "p95": 14.407,
+        "p99": 33.711,
+        "max": 286.216
+      },
+      "cached": {
+        "name": "cached",
+        "count": 500,
+        "p50": 0.509,
+        "p95": 0.723,
+        "p99": 1.336,
+        "max": 11.5
+      },
+      "worst_store": 78,
+      "largest_store_uncached": {
+        "name": "largest",
+        "count": 5,
+        "p50": 38.274,
+        "p95": 54.349,
+        "p99": 54.349,
+        "max": 54.349
+      }
+    },
+    {
+      "query": "FR-4 by status, last 7 days",
+      "uncached": {
+        "name": "uncached",
+        "count": 500,
+        "p50": 2.598,
+        "p95": 5.742,
+        "p99": 7.751,
+        "max": 47.641
+      },
+      "cached": {
+        "name": "cached",
+        "count": 500,
+        "p50": 0.504,
+        "p95": 0.718,
+        "p99": 1.092,
+        "max": 1.242
+      },
+      "worst_store": 72,
+      "largest_store_uncached": {
+        "name": "largest",
+        "count": 5,
+        "p50": 7.751,
+        "p95": 11.299,
+        "p99": 11.299,
+        "max": 11.299
+      }
+    },
+    {
+      "query": "FR-4 by category, last 30 days",
+      "uncached": {
+        "name": "uncached",
+        "count": 500,
+        "p50": 4.491,
+        "p95": 11.037,
+        "p99": 22.488,
+        "max": 29.384
+      },
+      "cached": {
+        "name": "cached",
+        "count": 500,
+        "p50": 0.344,
+        "p95": 0.714,
+        "p99": 1.745,
+        "max": 36.746
+      },
+      "worst_store": 42,
+      "largest_store_uncached": {
+        "name": "largest",
+        "count": 5,
+        "p50": 22.274,
+        "p95": 29.384,
+        "p99": 29.384,
+        "max": 29.384
+      }
+    },
+    {
+      "query": "FR-3 top 10 customers, last 30 days",
+      "uncached": {
+        "name": "uncached",
+        "count": 500,
+        "p50": 8.422,
+        "p95": 46.056,
+        "p99": 144.209,
+        "max": 256.385
+      },
+      "cached": {
+        "name": "cached",
+        "count": 500,
+        "p50": 0.505,
+        "p95": 0.878,
+        "p99": 1.591,
+        "max": 3.609
+      },
+      "worst_store": 42,
+      "largest_store_uncached": {
+        "name": "largest",
+        "count": 5,
+        "p50": 234.32,
+        "p95": 256.385,
+        "p99": 256.385,
+        "max": 256.385
+      }
+    },
+    {
+      "query": "FR-1 count, arbitrary timestamps",
+      "uncached": {
+        "name": "uncached",
+        "count": 500,
+        "p50": 2.044,
+        "p95": 3.73,
+        "p99": 4.926,
+        "max": 5.624
+      },
+      "cached": {
+        "name": "cached",
+        "count": 500,
+        "p50": 0,
+        "p95": 0.656,
+        "p99": 1.104,
+        "max": 1.556
+      },
+      "worst_store": 61,
+      "largest_store_uncached": {
+        "name": "largest",
+        "count": 5,
+        "p50": 3.256,
+        "p95": 3.634,
+        "p99": 3.634,
+        "max": 3.634
+      }
+    }
+  ],
+  "viewers": 1000,
+  "viewers_p50_ms": 2.191,
+  "viewers_p99_ms": 75.889,
+  "viewers_errors": 0
+}

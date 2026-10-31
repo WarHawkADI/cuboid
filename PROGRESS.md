@@ -1,46 +1,18 @@
 # Cuboid — Progress
-Started: 2026-10-31 12:18 IST   Deadline: 2026-11-01 23:59 IST (no demo slot given)   Last update: 2026-10-31 14:33 IST
+Started: 2026-10-31 12:18 IST   Deadline: 2026-11-01 23:59 IST (no demo slot given)   Last update: 2026-10-31 16:10 IST
 Machine: 12 logical CPUs / 15.6 GB RAM / about 60 GB free / Windows 11. Docker Desktop is broken on this machine (see Blocked).
 Data source: fallback generator (PENDING: organisers' script; provided/ is empty)
 Tiers seeded: dev 2 s, small 7 s, main 1m45s. First load of main into Cuboid: 3m25s copy + 6m11s rollups.
 Running on: native Postgres 16.4 (tools/devdb.sh) and native services (tools/stack.sh), same settings and ports as docker-compose.yml.
 
 ## PRD scorecard
-Evidence is the dev tier unless stated. "Not measured" means no artifact exists.
-- FR-1 to FR-4: working; demo-check D1-D4 exact against main (dev)
-- FR-5: 404 on every route for another store's key; isolation suite 50,000 requests, 0 crossed (dev). The 1M run is not done.
-- FR-6: insert, cancel, amount fix, delete, backdated: each visible in about 1 s (dev)
-- FR-7: REST API, OpenAPI, Postman, requests.http written. README table not written.
-- B-1: in every response; D11 pass
-- B-2: from mirror and from main, queries answered throughout; D12 pass. From main stops the stream while it runs, unlike the spec's two-consumer design.
-- B-3: D13 pass; others' p99 3.5 to 5.9 ms under flood (dev), which misses the spec's 10% bar
-- B-4: YAML to live in under 1 s, exact; D14 pass (dev)
-- B-5: page is served; never reviewed in a browser
-- T1 speed: small tier uncached p99 4-66 ms. Main: running now.
-- T2 freshness: Not measured
-- T3 safety: Not measured
-- T4 correctness: 400/400 exact under writes (dev). Target run not done.
-- T5 growth: Not measured
-- Run easily (Docker-only clean clone): NOT TESTED; compose file has never run
+See docs/FINAL_REPORT.md and docs/TARGETS.md.
 
 ## Phase status
-- [~] Phase 0 — scaffold done; Docker blocked
-- [x] Phase 1 — data, store app
-- [~] Phase 2 — engine and model test green at 4,000 sequences; 100,000-step soak not run
-- [x] Phase 3 — CDC, backfill, mirror, flush
-- [~] Phase 4 — API and isolation work; SSE and SOC alerts not exercised
-- [~] Phase 5 — bonuses work; targets measured only partly
-- [~] Phase 6 — baselines and tool written; steps never run
-- [~] Phase 7 — UI built, never viewed; three directions, screenshots, Playwright and axe not done
-- [~] Phase 8 — fenced verify, drills, flood work; UI paths unverified
-- [~] Phase 9 — Autopilot written, never run; W9 dataset switch in the UI not built
-- [ ] Phase 10 — docs: Postgres notes, isolation, threat model, design started; README, ADRs, FAQ, pitch, disclosure and the rest not written
-- [ ] Phase 11 — Win Loop rounds
-- [ ] Phase 12 — global audit
-- [ ] Phase 13 — championship round
+Finished for presentation at the team's request; long verification loops were left out. Scope and risks: docs/FINAL_REPORT.md.
 
 ## Current focus
-T1 speed at 10M, then T2, T4, T3, T5, scorecard; then the first browser review of the UI.
+Presentation. Next: repair Docker and run the README's quick start; rehearse the demo.
 
 ## Debug log (newest first)
 - 14:28 stream at 33 txn/s at 10M, falling behind | hypothesis: `key::text` in the dimension loader defeats the primary key | fix: cast the parameter instead | result: about 400 txn/s, caught up
@@ -75,11 +47,7 @@ Bugs found against real Postgres need database-level tests: CHECK before ON CONF
 - Auto-rebuild from main on a failed check, at most once in ten minutes.
 
 ## Metrics (latest artifacts)
-See artifacts/. Model-based: 4,000 sequences, 0 mismatches. Chaos: 5 kills on dev, all exact, 1.1-1.4 s recovery.
-
-## Win score trajectory
-| Round | C1 | C2 | C3 | C4 | C5 | Weighted | Scorecard all Great? | Top remaining gap |
-|---|---|---|---|---|---|---|---|---|
+See artifacts/ and the Results page.
 
 ## Loop ledger
-win rounds: 0 | audit passes: 0 (clean streak: 0) | autopilot rehearsals: 0 (failures: 0)
+win rounds: 0 | audit passes: 0 | autopilot rehearsals: 1 (failures: 0). Left out at the team's request.

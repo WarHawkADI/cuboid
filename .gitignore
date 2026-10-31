@@ -5,7 +5,14 @@ provided/*
 .env
 artifacts/*
 !artifacts/targets/
-!artifacts/screenshots/
+!artifacts/speed/
+!artifacts/growth/
+!artifacts/freshness/
+!artifacts/correctness/
+!artifacts/redteam/
+!artifacts/isolation/
+!artifacts/chaos/
+!artifacts/demo-check/
 artifacts/targets/*.tmp
 web/node_modules/
 web/dist/
@@ -14,3 +21,4 @@ bin/
 *.test
 *.out
 data/
+web/test-results/

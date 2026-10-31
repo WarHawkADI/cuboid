@@ -1,0 +1,186 @@
+{
+  "generated_at": "2026-10-31T15:42:26.0777591+05:30",
+  "rows": [
+    {
+      "id": "R1",
+      "check": "Store key on another store",
+      "pass": true,
+      "detail": "got 404, want 404"
+    },
+    {
+      "id": "R1",
+      "check": "Store key on a company route",
+      "pass": true,
+      "detail": "got 404, want 404"
+    },
+    {
+      "id": "R2",
+      "check": "No key",
+      "pass": true,
+      "detail": "got 401, want 401"
+    },
+    {
+      "id": "R2",
+      "check": "Malformed key",
+      "pass": true,
+      "detail": "got 401, want 401"
+    },
+    {
+      "id": "R2",
+      "check": "Right prefix, wrong secret",
+      "pass": true,
+      "detail": "got 401, want 401"
+    },
+    {
+      "id": "R2",
+      "check": "Key in the URL",
+      "pass": true,
+      "detail": "got 401, want 401"
+    },
+    {
+      "id": "R2",
+      "check": "Store key on an admin route",
+      "pass": true,
+      "detail": "got 401, want 401"
+    },
+    {
+      "id": "R3",
+      "check": "SQL in a filter value",
+      "pass": true,
+      "detail": "got 400, want 400"
+    },
+    {
+      "id": "R4",
+      "check": "n = 1,000,000,000",
+      "pass": true,
+      "detail": "got 400, want 400"
+    },
+    {
+      "id": "R4",
+      "check": "from after to",
+      "pass": true,
+      "detail": "got 400, want 400"
+    },
+    {
+      "id": "R4",
+      "check": "Unknown parameter",
+      "pass": true,
+      "detail": "got 400, want 400"
+    },
+    {
+      "id": "R4",
+      "check": "A 50-year range",
+      "pass": true,
+      "detail": "got 400, want 400"
+    },
+    {
+      "id": "R4",
+      "check": "No rollup covers the query",
+      "pass": true,
+      "detail": "got 422, want 422"
+    },
+    {
+      "id": "R6",
+      "check": "Subscribing to another store's stream",
+      "pass": true,
+      "detail": "got 404, want 404"
+    },
+    {
+      "id": "W",
+      "check": "Own store's stream delivers frames for this store",
+      "pass": true,
+      "detail": "3 frames in 8 s"
+    },
+    {
+      "id": "W9",
+      "check": "SOC alerts answer the same four queries",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "W9",
+      "check": "SOC alerts match the main database",
+      "pass": true,
+      "detail": "14 rows; "
+    },
+    {
+      "id": "L4",
+      "check": "Reader role with no tenant setting sees no cells",
+      "pass": true,
+      "detail": "0 rows "
+    },
+    {
+      "id": "L4",
+      "check": "Reader role with no tenant setting sees no mirror rows",
+      "pass": true,
+      "detail": "0 rows "
+    },
+    {
+      "id": "L4",
+      "check": "Reader scoped to one store cannot see another",
+      "pass": true,
+      "detail": "0 rows "
+    },
+    {
+      "id": "L4",
+      "check": "Reader role cannot write",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "I11",
+      "check": "No PII column in the mirror",
+      "pass": true,
+      "detail": "0 PII columns"
+    },
+    {
+      "id": "I1",
+      "check": "Cuboid refuses to start with another main-database role",
+      "pass": true,
+      "detail": "refusing to start: a main-database DSN connects as \\\"naive_dash\\\", but Cuboid may only hold cuboid_cdc there ("
+    },
+    {
+      "id": "I11",
+      "check": "No store key in Cuboid's log",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "D",
+      "check": "Product recategorised to a brand-new category: exact",
+      "pass": true,
+      "detail": "13s; 14 rows; "
+    },
+    {
+      "id": "D",
+      "check": "Recategorised back: exact",
+      "pass": true,
+      "detail": "13 rows; "
+    },
+    {
+      "id": "D",
+      "check": "Customer changes city: exact",
+      "pass": true,
+      "detail": "153 rows; "
+    },
+    {
+      "id": "R8",
+      "check": "Order moved between stores: both exact",
+      "pass": true,
+      "detail": "1 rows; ; 1 rows; "
+    },
+    {
+      "id": "R8",
+      "check": "Security event raised for the move",
+      "pass": true,
+      "detail": "1 events"
+    },
+    {
+      "id": "D",
+      "check": "50,000-row update in one transaction: exact",
+      "pass": true,
+      "detail": "49997 rows, exact after 10s; 1 rows; "
+    }
+  ],
+  "tier": "main"
+}

@@ -1,0 +1,144 @@
+{
+  "generated_at": "2026-10-31T14:07:58.2543377+05:30",
+  "rows": [
+    {
+      "id": "D1",
+      "check": "Orders and total sales, last 7 days, largest store",
+      "pass": true,
+      "detail": "1 rows; "
+    },
+    {
+      "id": "D1",
+      "check": "Orders and total sales, last 7 days, smallest store",
+      "pass": true,
+      "detail": "1 rows; "
+    },
+    {
+      "id": "D2",
+      "check": "Orders per day, last 30 days",
+      "pass": true,
+      "detail": "31 rows; "
+    },
+    {
+      "id": "D3",
+      "check": "Top 10 products by sales this week",
+      "pass": true,
+      "detail": "252 rows; "
+    },
+    {
+      "id": "D4",
+      "check": "Orders by status",
+      "pass": true,
+      "detail": "5 rows; "
+    },
+    {
+      "id": "D5",
+      "check": "Add an order: the count goes up",
+      "pass": true,
+      "detail": "1.019s"
+    },
+    {
+      "id": "D6",
+      "check": "Order moves from placed to cancelled",
+      "pass": true,
+      "detail": "390ms"
+    },
+    {
+      "id": "D7",
+      "check": "Amount corrected",
+      "pass": true,
+      "detail": "1.018s"
+    },
+    {
+      "id": "D7",
+      "check": "Order deleted",
+      "pass": true,
+      "detail": "990ms"
+    },
+    {
+      "id": "D7",
+      "check": "Backdated order inserted, then checked",
+      "pass": true,
+      "detail": "1 rows; "
+    },
+    {
+      "id": "D8",
+      "check": "count?from=...\u0026to=... with arbitrary timestamps",
+      "pass": true,
+      "detail": "1 rows; "
+    },
+    {
+      "id": "D9",
+      "check": "Store 42's key on store 40, every endpoint",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "D10",
+      "check": "Company 7, all 3 stores",
+      "pass": true,
+      "detail": "3 rows; "
+    },
+    {
+      "id": "D10",
+      "check": "Company key on a store of another company",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "D11",
+      "check": "Response states as_of, LSN, lag and updated",
+      "pass": true,
+      "detail": "updated just now"
+    },
+    {
+      "id": "D12",
+      "check": "Rebuild from mirror while queries answer",
+      "pass": true,
+      "detail": "25 answered, 0 failed during it; afterwards 13 rows; "
+    },
+    {
+      "id": "D12",
+      "check": "Rebuild from main while queries answer",
+      "pass": true,
+      "detail": "393 answered, 0 failed during it; afterwards 13 rows; "
+    },
+    {
+      "id": "D13",
+      "check": "Biggest store floods: it is limited, others are not",
+      "pass": true,
+      "detail": "3359 limited (3359 heavy), others' p99 7.2 to 11.0 ms, 40 of its own light queries answered"
+    },
+    {
+      "id": "D14",
+      "check": "Add status_payment in YAML: breakdown by payment method",
+      "pass": true,
+      "detail": "live in 762 ms; 5 rows; "
+    },
+    {
+      "id": "D15",
+      "check": "Monitoring state: query time, data lag, recorder",
+      "pass": true,
+      "detail": "lag 140 ms, 2 endpoints, 118 points (the browser check is separate)"
+    },
+    {
+      "id": "D17",
+      "check": "Leak drill A",
+      "pass": true,
+      "detail": "362237 requests, 241856 faults, 241856 blocked, 0 leaked"
+    },
+    {
+      "id": "D17",
+      "check": "Leak drill B",
+      "pass": true,
+      "detail": "70954 requests, 10904 faults, 20082 blocked, 0 leaked"
+    },
+    {
+      "id": "D17",
+      "check": "Leak drill C",
+      "pass": true,
+      "detail": "84858 requests, 13404 faults, 22250 blocked, 0 leaked"
+    }
+  ],
+  "tier": "dev"
+}

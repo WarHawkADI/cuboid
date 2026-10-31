@@ -1,0 +1,20 @@
+{
+  "tier": "main",
+  "generated_at": "2026-10-31T15:08:31.8403446+05:30",
+  "quiesced": {
+    "total": 2000,
+    "exact": 2000,
+    "mismatch": 0,
+    "failed": 0,
+    "errors": null,
+    "seconds": 440.3951092
+  },
+  "live": {
+    "total": 500,
+    "exact": 500,
+    "mismatch": 0,
+    "failed": 0,
+    "errors": null,
+    "seconds": 132.1105448
+  }
+}

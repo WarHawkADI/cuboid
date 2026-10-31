@@ -1,0 +1,112 @@
+{
+  "generated_at": "2026-10-31T15:41:23.1547316+05:30",
+  "rows": [
+    {
+      "query": "FR-1 count, last 7 days",
+      "uncached_p50_ratio": 1.2958305757776307,
+      "uncached_p99_ratio": 2.2867445054945055,
+      "cached_p50_ratio": 0,
+      "cached_p99_ratio": 1.4565499351491569,
+      "small_uncached_p99_ms": 2.912,
+      "main_uncached_p99_ms": 6.659,
+      "absolute_difference_p99_ms": 3.747,
+      "largest_store_small_p99_ms": 2.912,
+      "largest_store_main_p99_ms": 6.452,
+      "largest_store_ratio": 2.215659340659341
+    },
+    {
+      "query": "FR-1 summary, last 7 days",
+      "uncached_p50_ratio": 1.3708086785009863,
+      "uncached_p99_ratio": 2.0390869293308316,
+      "cached_p50_ratio": 0,
+      "cached_p99_ratio": 1.1203980099502489,
+      "small_uncached_p99_ms": 3.198,
+      "main_uncached_p99_ms": 6.521,
+      "absolute_difference_p99_ms": 3.323,
+      "largest_store_small_p99_ms": 3.198,
+      "largest_store_main_p99_ms": 6.005,
+      "largest_store_ratio": 1.8777360850531581
+    },
+    {
+      "query": "FR-2 trend per day, last 30 days",
+      "uncached_p50_ratio": 1.7245471580262337,
+      "uncached_p99_ratio": 2.420292682926829,
+      "cached_p50_ratio": 0,
+      "cached_p99_ratio": 2.1757156959526163,
+      "small_uncached_p99_ms": 5.125,
+      "main_uncached_p99_ms": 12.404,
+      "absolute_difference_p99_ms": 7.279,
+      "largest_store_small_p99_ms": 5.125,
+      "largest_store_main_p99_ms": 18.235,
+      "largest_store_ratio": 3.558048780487805
+    },
+    {
+      "query": "FR-3 top 10 products, this week",
+      "uncached_p50_ratio": 1.0222419928825621,
+      "uncached_p99_ratio": 2.7996844115937214,
+      "cached_p50_ratio": 0,
+      "cached_p99_ratio": 1.7260981912144704,
+      "small_uncached_p99_ms": 12.041,
+      "main_uncached_p99_ms": 33.711,
+      "absolute_difference_p99_ms": 21.669999999999998,
+      "largest_store_small_p99_ms": 12.041,
+      "largest_store_main_p99_ms": 54.349,
+      "largest_store_ratio": 4.513661656008637
+    },
+    {
+      "query": "FR-4 by status, last 7 days",
+      "uncached_p50_ratio": 1.0285035629453683,
+      "uncached_p99_ratio": 1.9011528084375768,
+      "cached_p50_ratio": 1,
+      "cached_p99_ratio": 1.0876494023904384,
+      "small_uncached_p99_ms": 4.077,
+      "main_uncached_p99_ms": 7.751,
+      "absolute_difference_p99_ms": 3.6740000000000004,
+      "largest_store_small_p99_ms": 3.959,
+      "largest_store_main_p99_ms": 11.299,
+      "largest_store_ratio": 2.854003536246527
+    },
+    {
+      "query": "FR-4 by category, last 30 days",
+      "uncached_p50_ratio": 0.9327102803738316,
+      "uncached_p99_ratio": 0.22601686483009537,
+      "cached_p50_ratio": 0,
+      "cached_p99_ratio": 1.7363184079601992,
+      "small_uncached_p99_ms": 99.497,
+      "main_uncached_p99_ms": 22.488,
+      "absolute_difference_p99_ms": -77.009,
+      "largest_store_small_p99_ms": 7.833,
+      "largest_store_main_p99_ms": 29.384,
+      "largest_store_ratio": 3.751308566321971
+    },
+    {
+      "query": "FR-3 top 10 customers, last 30 days",
+      "uncached_p50_ratio": 1.5677587490692482,
+      "uncached_p99_ratio": 8.565514373960562,
+      "cached_p50_ratio": 0,
+      "cached_p99_ratio": 1.4897003745318351,
+      "small_uncached_p99_ms": 16.836,
+      "main_uncached_p99_ms": 144.209,
+      "absolute_difference_p99_ms": 127.373,
+      "largest_store_small_p99_ms": 16.836,
+      "largest_store_main_p99_ms": 256.385,
+      "largest_store_ratio": 15.228379662627704
+    },
+    {
+      "query": "FR-1 count, arbitrary timestamps",
+      "uncached_p50_ratio": 1.7205387205387206,
+      "uncached_p99_ratio": 1.2493025615013948,
+      "cached_p50_ratio": 0,
+      "cached_p99_ratio": 0.4249422632794458,
+      "small_uncached_p99_ms": 3.943,
+      "main_uncached_p99_ms": 4.926,
+      "absolute_difference_p99_ms": 0.9830000000000001,
+      "largest_store_small_p99_ms": 2.937,
+      "largest_store_main_p99_ms": 3.634,
+      "largest_store_ratio": 1.2373169901259788
+    }
+  ],
+  "worst_uncached_p99_ratio": 15.228379662627704,
+  "worst_query": "FR-3 top 10 customers, last 30 days",
+  "note": "Ratios of values under 10 ms are mostly noise; the absolute difference is published beside each ratio."
+}
