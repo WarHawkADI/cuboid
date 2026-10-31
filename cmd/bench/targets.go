@@ -423,12 +423,18 @@ type growthRow struct {
 	SmallP99MS   float64 `json:"small_uncached_p99_ms"`
 	MainP99MS    float64 `json:"main_uncached_p99_ms"`
 	AbsDiffP99MS float64 `json:"absolute_difference_p99_ms"`
+	// The largest store of each tier, the same relative rank: pooled over every
+	// store, a tier with more small stores looks better than it is.
+	LargestP99Small float64 `json:"largest_store_small_p99_ms"`
+	LargestP99Main  float64 `json:"largest_store_main_p99_ms"`
+	LargestRatio    float64 `json:"largest_store_ratio"`
 }
 
 type growthArtifact struct {
 	GeneratedAt time.Time   `json:"generated_at"`
 	Rows        []growthRow `json:"rows"`
 	WorstP99    float64     `json:"worst_uncached_p99_ratio"`
+	WorstQuery  string      `json:"worst_query"`
 	Note        string      `json:"note"`
 }
 
@@ -464,12 +470,15 @@ func runGrowth() {
 		s := small.Rows[i]
 		g := growthRow{Query: r.Query, UncachedP50: ratio(r.Uncached.P50, s.Uncached.P50), UncachedP99: ratio(r.Uncached.P99, s.Uncached.P99),
 			CachedP50: ratio(r.Cached.P50, s.Cached.P50), CachedP99: ratio(r.Cached.P99, s.Cached.P99),
-			SmallP99MS: s.Uncached.P99, MainP99MS: r.Uncached.P99, AbsDiffP99MS: r.Uncached.P99 - s.Uncached.P99}
-		if g.UncachedP99 > art.WorstP99 {
-			art.WorstP99 = g.UncachedP99
+			SmallP99MS: s.Uncached.P99, MainP99MS: r.Uncached.P99, AbsDiffP99MS: r.Uncached.P99 - s.Uncached.P99,
+			LargestP99Small: s.Largest.P99, LargestP99Main: r.Largest.P99, LargestRatio: ratio(r.Largest.P99, s.Largest.P99)}
+		worst := max(g.UncachedP99, g.LargestRatio)
+		if worst > art.WorstP99 {
+			art.WorstP99 = worst
+			art.WorstQuery = r.Query
 		}
 		art.Rows = append(art.Rows, g)
-		fmt.Printf("  %-38s p99 %6.1f to %6.1f ms = %.2fx (p50 %.2fx; cached p99 %.2fx)\n", r.Query, s.Uncached.P99, r.Uncached.P99, g.UncachedP99, g.UncachedP50, g.CachedP99)
+		fmt.Printf("  %-38s pooled p99 %6.1f to %6.1f ms = %.2fx; largest store p99 %6.1f to %6.1f ms = %.2fx\n", r.Query, s.Uncached.P99, r.Uncached.P99, g.UncachedP99, s.Largest.P99, r.Largest.P99, g.LargestRatio)
 	}
 	writeArtifact("growth", "latest", art)
 }
@@ -572,7 +581,7 @@ func writeScorecard(w *world) {
 		r := missing("T5", "Growth", "Query speed at 1M vs 10M records", "Less than 5x slower", "Less than 2x slower", "make growth-test")
 		var a growthArtifact
 		if readJSON("growth", "latest", &a) == nil && len(a.Rows) > 0 {
-			r.Measured = fmt.Sprintf("Worst uncached p99 ratio %.2fx", a.WorstP99)
+			r.Measured = fmt.Sprintf("Worst uncached p99 ratio %.2fx (%s)", a.WorstP99, a.WorstQuery)
 			r.Verdict = verdict(a.WorstP99, 5, 2)
 		}
 		rows = append(rows, r)

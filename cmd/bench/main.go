@@ -3,7 +3,7 @@
 // benchmark steps. Every published number comes from an artifact it writes.
 //
 //	bench speed | freshness | safety | correctness | growth | targets
-//	bench demo-check | isolation [-requests N] | chaos [-n N] | steps
+//	bench demo-check | redteam | isolation [-requests N] | chaos [-n N] | steps
 package main
 
 import (
@@ -258,6 +258,10 @@ func main() {
 		}
 	case "steps":
 		runSteps(w, *phase)
+	case "redteam":
+		if !runRedTeam(ctx, w) {
+			os.Exit(1)
+		}
 	default:
 		fatal(fmt.Errorf("unknown command %q", cmd))
 	}
