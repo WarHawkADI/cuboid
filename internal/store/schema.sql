@@ -2,16 +2,19 @@
 -- from config/metrics.yaml and the main database's catalog (internal/mirror).
 -- Idempotent: runs at every start as cuboid_writer.
 
-CREATE TABLE IF NOT EXISTS cdc_state (
-  id                  int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+-- One row per source database: the platform's, and each store's (ADR-012).
+-- A source's position commits in the same transaction as the data it brings.
+DROP TABLE IF EXISTS cdc_state;
+CREATE TABLE IF NOT EXISTS cdc_sources (
+  source              text PRIMARY KEY,  -- the source database
+  tenant_id           int UNIQUE,        -- the store whose database it is; NULL for the platform's
   slot                text,
   applied_lsn         pg_lsn NOT NULL DEFAULT '0/0',
   applied_commit_time timestamptz,
-  heartbeat_time      timestamptz,   -- send time of the latest heartbeat applied and flushed
-  backfilled_at       timestamptz,
+  heartbeat_time      timestamptz,       -- send time of the latest heartbeat applied and flushed
+  backfilled_at       timestamptz,       -- when the source was last loaded from a snapshot
   flushes             bigint NOT NULL DEFAULT 0
 );
-INSERT INTO cdc_state (id) VALUES (1) ON CONFLICT DO NOTHING;
 
 -- Dimension values, dictionary-encoded. Id 0 is reserved for NULL.
 CREATE TABLE IF NOT EXISTS dict (
@@ -89,4 +92,4 @@ CREATE TABLE IF NOT EXISTS verifications (
 -- never a wrong number.
 CREATE OR REPLACE AGGREGATE exact_sum(bigint) (sfunc = int8pl, stype = bigint, initcond = '0');
 
-GRANT SELECT ON cdc_state, dict, rollup_registry, data_versions, api_keys TO cuboid_reader;
+GRANT SELECT ON cdc_sources, dict, rollup_registry, data_versions, api_keys TO cuboid_reader;

@@ -30,6 +30,7 @@ import (
 
 type tenant struct {
 	id        int32
+	pool      *pgxpool.Pool // the store's own database (ADR-012)
 	weight    float64
 	nextOrder atomic.Int64
 	products  int64
@@ -39,7 +40,8 @@ type tenant struct {
 }
 
 type sim struct {
-	pool    *pgxpool.Pool
+	pool    *pgxpool.Pool // the platform's database: the store registry and the load flag
+	dsn     string
 	log     *slog.Logger
 	tenants []*tenant
 	cdf     []float64
@@ -87,9 +89,9 @@ func main() {
 		log.Error("dsn", "err", err)
 		os.Exit(1)
 	}
-	cfg.MaxConns = 24
+	cfg.MaxConns = 4
 	cfg.ConnConfig.RuntimeParams["application_name"] = "storesim"
-	s := &sim{log: log}
+	s := &sim{log: log, dsn: env("STORESIM_MAIN_DSN", "postgres://app:app@localhost:5433/shop")}
 	for i := 0; ; i++ {
 		if s.pool, err = pgxpool.NewWithConfig(ctx, cfg); err == nil && s.pool.Ping(ctx) == nil {
 			break
@@ -149,25 +151,48 @@ func (s *sim) loadTenantsLoop(ctx context.Context) {
 }
 
 func (s *sim) loadTenants(ctx context.Context) error {
-	rows, err := s.pool.Query(ctx, `SELECT t.tenant_id,
-			coalesce((SELECT max(order_id) FROM orders o WHERE o.tenant_id = t.tenant_id), 0),
-			coalesce((SELECT max(product_id) FROM products p WHERE p.tenant_id = t.tenant_id), 0),
-			coalesce((SELECT max(customer_id) FROM customers c WHERE c.tenant_id = t.tenant_id), 0)
-		FROM tenants t ORDER BY 1`)
+	rows, err := s.pool.Query(ctx, "SELECT tenant_id FROM tenants ORDER BY 1")
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	var ts []*tenant
-	var total float64
+	var ids []int32
 	for rows.Next() {
-		t := &tenant{}
-		var maxOrder int64
-		if err := rows.Scan(&t.id, &maxOrder, &t.products, &t.customers); err != nil {
+		var id int32
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
 			return err
 		}
-		if t.products == 0 || t.customers == 0 {
-			continue
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	old := s.tenants
+	s.mu.Unlock()
+	var ts []*tenant
+	var total float64
+	for _, id := range ids {
+		t := &tenant{id: id}
+		cfg, err := pgxpool.ParseConfig(s.dsn)
+		if err != nil {
+			return err
+		}
+		cfg.ConnConfig.Database = fmt.Sprintf("store_%d", id)
+		cfg.MaxConns = 3
+		cfg.MaxConnIdleTime = 30 * time.Second
+		cfg.ConnConfig.RuntimeParams["application_name"] = "storesim"
+		if t.pool, err = pgxpool.NewWithConfig(ctx, cfg); err != nil {
+			return err
+		}
+		var maxOrder int64
+		err = t.pool.QueryRow(ctx, `SELECT coalesce((SELECT max(order_id) FROM orders), 0),
+				coalesce((SELECT max(product_id) FROM products), 0), coalesce((SELECT max(customer_id) FROM customers), 0)`).
+			Scan(&maxOrder, &t.products, &t.customers)
+		if err != nil || t.products == 0 || t.customers == 0 {
+			t.pool.Close()
+			continue // its database is not created or not loaded yet
 		}
 		t.nextOrder.Store(maxOrder)
 		t.weight = float64(maxOrder) + 1000
@@ -186,6 +211,9 @@ func (s *sim) loadTenants(ctx context.Context) error {
 	s.mu.Lock()
 	s.tenants, s.cdf = ts, cdf
 	s.mu.Unlock()
+	for _, t := range old {
+		t.pool.Close()
+	}
 	return nil
 }
 
@@ -279,13 +307,13 @@ func (s *sim) read(ctx context.Context, t *tenant) error {
 	switch rand.IntN(3) {
 	case 0: // get an order by id
 		var amount int64
-		err := s.pool.QueryRow(ctx, "SELECT amount_paise FROM orders WHERE tenant_id = $1 AND order_id = $2", t.id, 1+rand.Int64N(max)).Scan(&amount)
+		err := t.pool.QueryRow(ctx, "SELECT amount_paise FROM orders WHERE tenant_id = $1 AND order_id = $2", t.id, 1+rand.Int64N(max)).Scan(&amount)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		return err
 	case 1: // a customer's last 10 orders
-		rows, err := s.pool.Query(ctx, `SELECT order_id, status, amount_paise, created_at FROM orders
+		rows, err := t.pool.Query(ctx, `SELECT order_id, status, amount_paise, created_at FROM orders
 			WHERE tenant_id = $1 AND customer_id = $2 ORDER BY created_at DESC LIMIT 10`, t.id, 1+rand.Int64N(t.customers))
 		if err != nil {
 			return err
@@ -296,7 +324,7 @@ func (s *sim) read(ctx context.Context, t *tenant) error {
 		return rows.Err()
 	default: // a product with its details
 		var name string
-		err := s.pool.QueryRow(ctx, "SELECT name FROM products WHERE tenant_id = $1 AND product_id = $2", t.id, 1+rand.Int64N(t.products)).Scan(&name)
+		err := t.pool.QueryRow(ctx, "SELECT name FROM products WHERE tenant_id = $1 AND product_id = $2", t.id, 1+rand.Int64N(t.products)).Scan(&name)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -330,10 +358,10 @@ func (s *sim) alerts(ctx context.Context) {
 		}
 		var err error
 		if rand.IntN(4) == 0 {
-			_, err = s.pool.Exec(ctx, `UPDATE soc_alerts SET status = 'resolved', updated_at = now() WHERE tenant_id = $1 AND alert_id = (
+			_, err = t.pool.Exec(ctx, `UPDATE soc_alerts SET status = 'resolved', updated_at = now() WHERE tenant_id = $1 AND alert_id = (
 				SELECT max(alert_id) FROM soc_alerts WHERE tenant_id = $1) AND status = 'new'`, t.id)
 		} else {
-			_, err = s.pool.Exec(ctx, `INSERT INTO soc_alerts (tenant_id, alert_id, severity, source_product, tactic, status, asset_id, risk_score, created_at, updated_at)
+			_, err = t.pool.Exec(ctx, `INSERT INTO soc_alerts (tenant_id, alert_id, severity, source_product, tactic, status, asset_id, risk_score, created_at, updated_at)
 				SELECT $1::int, coalesce(max(alert_id), 0) + 1, $2::text, $3::text, $4::text, 'new', $5::bigint, $6::int, now(), now() FROM soc_alerts WHERE tenant_id = $1`,
 				t.id, alertSeverities[rand.IntN(len(alertSeverities))], alertSources[rand.IntN(len(alertSources))], alertTactics[rand.IntN(len(alertTactics))], 1+rand.Int64N(200), rand.IntN(101))
 		}
@@ -353,24 +381,24 @@ func (s *sim) write(ctx context.Context, t *tenant) error {
 		return s.advance(ctx, t)
 	case r < 940: // cancel a placed order
 		if id, ok := t.recentOrder(); ok {
-			_, err := s.pool.Exec(ctx, "UPDATE orders SET status = 'cancelled', updated_at = now() WHERE tenant_id = $1 AND order_id = $2 AND status = 'placed'", t.id, id)
+			_, err := t.pool.Exec(ctx, "UPDATE orders SET status = 'cancelled', updated_at = now() WHERE tenant_id = $1 AND order_id = $2 AND status = 'placed'", t.id, id)
 			return err
 		}
 	case r < 960: // correct an amount
 		if id, ok := t.recentOrder(); ok {
-			_, err := s.pool.Exec(ctx, "UPDATE orders SET amount_paise = amount_paise + 1000, updated_at = now() WHERE tenant_id = $1 AND order_id = $2", t.id, id)
+			_, err := t.pool.Exec(ctx, "UPDATE orders SET amount_paise = amount_paise + 1000, updated_at = now() WHERE tenant_id = $1 AND order_id = $2", t.id, id)
 			return err
 		}
 	case r < 975: // return an old delivered order
-		_, err := s.pool.Exec(ctx, `UPDATE orders SET status = 'returned', updated_at = now()
+		_, err := t.pool.Exec(ctx, `UPDATE orders SET status = 'returned', updated_at = now()
 			WHERE tenant_id = $1 AND order_id = $2 AND status = 'delivered'`, t.id, 1+rand.Int64N(max64(1, t.nextOrder.Load()*9/10)))
 		return err
 	case r < 995: // a late update to an order weeks old
-		_, err := s.pool.Exec(ctx, `UPDATE orders SET quantity = quantity + 1, amount_paise = amount_paise + amount_paise / quantity, updated_at = now()
+		_, err := t.pool.Exec(ctx, `UPDATE orders SET quantity = quantity + 1, amount_paise = amount_paise + amount_paise / quantity, updated_at = now()
 			WHERE tenant_id = $1 AND order_id = $2`, t.id, 1+rand.Int64N(max64(1, t.nextOrder.Load()*95/100)))
 		return err
 	default: // a rare hard delete
-		_, err := s.pool.Exec(ctx, "DELETE FROM orders WHERE tenant_id = $1 AND order_id = $2", t.id, 1+rand.Int64N(max64(1, t.nextOrder.Load())))
+		_, err := t.pool.Exec(ctx, "DELETE FROM orders WHERE tenant_id = $1 AND order_id = $2", t.id, 1+rand.Int64N(max64(1, t.nextOrder.Load())))
 		return err
 	}
 	return nil
@@ -397,7 +425,7 @@ func (s *sim) advance(ctx context.Context, t *tenant) error {
 	if !ok {
 		return nil
 	}
-	_, err := s.pool.Exec(ctx, `UPDATE orders SET status = CASE status WHEN 'placed' THEN 'shipped' WHEN 'shipped' THEN 'delivered' ELSE status END,
+	_, err := t.pool.Exec(ctx, `UPDATE orders SET status = CASE status WHEN 'placed' THEN 'shipped' WHEN 'shipped' THEN 'delivered' ELSE status END,
 		updated_at = now() WHERE tenant_id = $1 AND order_id = $2 AND status IN ('placed', 'shipped')`, t.id, id)
 	return err
 }
@@ -454,7 +482,7 @@ func (s *sim) placeOrder(ctx context.Context, t *tenant, in orderInput) (*orderO
 	for attempt := 0; attempt < 5; attempt++ {
 		o.OrderID = t.nextOrder.Add(1)
 		// No row back means the id was taken or the product does not exist.
-		err := s.pool.QueryRow(ctx, `INSERT INTO orders (tenant_id, order_id, customer_id, product_id, quantity, amount_paise, status, payment_method, channel, created_at, updated_at)
+		err := t.pool.QueryRow(ctx, `INSERT INTO orders (tenant_id, order_id, customer_id, product_id, quantity, amount_paise, status, payment_method, channel, created_at, updated_at)
 			SELECT $1::int, $2::bigint, $3::bigint, $4::bigint, $5::int, p.price_paise * $5::int, $6::text, $7::text, $8::text, $9::timestamptz, $9::timestamptz
 			FROM products p WHERE p.tenant_id = $1::int AND p.product_id = $4::bigint
 			ON CONFLICT DO NOTHING RETURNING amount_paise`,
@@ -575,7 +603,7 @@ func (s *sim) routes() http.Handler {
 			created = &c
 		}
 		var out orderOut
-		err := s.pool.QueryRow(r.Context(), `UPDATE orders SET status = coalesce($3, status), amount_paise = coalesce($4, amount_paise),
+		err := t.pool.QueryRow(r.Context(), `UPDATE orders SET status = coalesce($3, status), amount_paise = coalesce($4, amount_paise),
 				created_at = coalesce($5, created_at), updated_at = now()
 			WHERE tenant_id = $1 AND order_id = $2
 			RETURNING tenant_id, order_id, customer_id, product_id, quantity, amount_paise, status, created_at`,
@@ -596,7 +624,7 @@ func (s *sim) routes() http.Handler {
 			return
 		}
 		oid, _ := strconv.ParseInt(r.PathValue("order"), 10, 64)
-		tag, err := s.pool.Exec(r.Context(), "DELETE FROM orders WHERE tenant_id = $1 AND order_id = $2", t.id, oid)
+		tag, err := t.pool.Exec(r.Context(), "DELETE FROM orders WHERE tenant_id = $1 AND order_id = $2", t.id, oid)
 		if err != nil {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
 			return
@@ -664,7 +692,7 @@ func (s *sim) scenario(w http.ResponseWriter, r *http.Request) {
 		}
 		// One transaction correcting 50,000 orders' amounts: every contribution
 		// must be retracted and re-added, atomically.
-		tag, err := s.pool.Exec(ctx, `UPDATE orders SET amount_paise = amount_paise + 100, updated_at = now()
+		tag, err := t.pool.Exec(ctx, `UPDATE orders SET amount_paise = amount_paise + 100, updated_at = now()
 			WHERE tenant_id = $1 AND order_id > $2`, t.id, max64(0, t.nextOrder.Load()-int64(b.N)))
 		if err != nil {
 			writeJSON(w, 500, map[string]string{"error": err.Error()})
@@ -681,7 +709,7 @@ func (s *sim) scenario(w http.ResponseWriter, r *http.Request) {
 		var total int64
 		for i := 0; i < b.N; i++ {
 			old := max64(1, t.nextOrder.Load()*int64(70+rand.IntN(20))/100)
-			tag, err := s.pool.Exec(ctx, "UPDATE orders SET status = 'returned', updated_at = now() WHERE tenant_id = $1 AND order_id = $2 AND status = 'delivered'", t.id, old)
+			tag, err := t.pool.Exec(ctx, "UPDATE orders SET status = 'returned', updated_at = now() WHERE tenant_id = $1 AND order_id = $2 AND status = 'delivered'", t.id, old)
 			if err == nil {
 				total += tag.RowsAffected()
 			}
@@ -689,7 +717,7 @@ func (s *sim) scenario(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"scenario": b.Name, "rows": total, "took_ms": time.Since(start).Milliseconds()})
 	case "truncate_reload":
 		// TRUNCATE invalidates every rollup; Cuboid must notice and rebuild.
-		tx, err := s.pool.Begin(ctx)
+		tx, err := t.pool.Begin(ctx)
 		if err != nil {
 			writeJSON(w, 500, map[string]string{"error": err.Error()})
 			return

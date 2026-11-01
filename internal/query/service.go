@@ -63,8 +63,9 @@ type Service struct {
 	Stats   *Stats
 	Drill   *Drill
 	Latency *monitor.Latency
-	// Fresh reports the state of the latest flush, for answers served from cache.
-	Fresh func() store.Freshness
+	// Fresh reports how fresh the given stores' data is, for answers served
+	// from cache: the oldest of their source databases.
+	Fresh func(tenants []int32) store.Freshness
 	sf    singleflight.Group
 	// lastRefresh is when each moving preset's answer last began refreshing.
 	lastRefresh sync.Map
@@ -257,7 +258,7 @@ func (s *Service) Execute(ctx context.Context, t Target, req *Request, opt ExecO
 		s.Drill.checked(LayerCachePartition)
 		if e, ok := s.Cache.Get(t.Partition, key); ok {
 			r := e.Value.(*Response).withCache("hit")
-			r.Freshness = s.freshness(s.Fresh())
+			r.Freshness = s.freshness(s.Fresh(t.Tenants))
 			r.Meta.Timing.Total = ms(time.Since(start))
 			return r, nil
 		}

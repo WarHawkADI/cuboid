@@ -306,7 +306,7 @@ func (a *API) meta(w http.ResponseWriter, r *http.Request, company bool) {
 	}
 	resp := &Response{Query: map[string]any{"endpoint": "meta"}, tenants: tenantsInData,
 		Data:      map[string]any{"sources": sources, "rollups": rollups, "presets": timeutil.Presets, "timezone": a.Svc.Loc.String()},
-		Freshness: a.Svc.freshness(a.Svc.Fresh())}
+		Freshness: a.Svc.freshness(a.Svc.Fresh(t.Tenants))}
 	a.writeData(w, t, resp)
 }
 
@@ -397,5 +397,5 @@ func (a *API) verify(w http.ResponseWriter, r *http.Request, company bool) {
 	}
 	// The verification result holds both answers for this request's stores only.
 	a.writeData(w, t, &Response{Query: req.Echo, From: timeutil.Format(req.Query.From, a.Svc.Loc), To: timeutil.Format(req.Query.To, a.Svc.Loc),
-		Data: result, tenants: t.Tenants, Freshness: a.Svc.freshness(a.Svc.Fresh())})
+		Data: result, tenants: t.Tenants, Freshness: a.Svc.freshness(a.Svc.Fresh(t.Tenants))})
 }

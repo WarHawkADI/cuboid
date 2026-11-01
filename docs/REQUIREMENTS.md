@@ -29,7 +29,7 @@ Status: **Proven** (a run in this project shows it), **Partial** (works, but som
 | ID | Requirement | Component | Proof | Status |
 |---|---|---|---|---|
 | B-1 | How fresh the data is | `freshness` in every response | D11 | Proven |
-| B-2 | Rebuild from scratch | `internal/core/rebuild.go` | D12 | Proven at 10M; the stream stops during a rebuild from main, a logged deviation |
+| B-2 | Rebuild from scratch | `internal/core/sources.go`, `internal/backfill` | D12 | Proven with a database per store: each store reloads in its own transaction while the others stream (D12 at 1M; a truncated store and a lost slot at 10M) |
 | B-3 | Limit heavy queries per tenant | `internal/limiter` | D13 | Proven at 10M in D13; others' p99 stayed under 3 ms |
 | B-4 | New metric by config | `internal/core/reload.go` | D14 | Proven |
 | B-5 | Monitoring page | `web/src/views/Monitor.tsx` | D15 for its data | Proven; `web/e2e/shots.mjs` checks it in a browser |
@@ -39,6 +39,7 @@ Status: **Proven** (a run in this project shows it), **Partial** (works, but som
 |---|---|---|---|
 | 1M records, 10 tenants | `cmd/seed --tier small` | Seeded and measured | Proven |
 | 10M records, 100 tenants, a few much bigger | `cmd/seed --tier main` | Largest store 19.3%, smallest 19,278 orders | Proven |
+| Each tenant's orders, products and customers in their respective database | `migrations/main/001_schema.sql`, `cmd/seed`, ADR-012 | One database per store, pinned by CHECK; R8 shows another store's row refused | Proven at 1M and 10M |
 | Organisers' script generates the data | `provided/` is empty | | Not proven: the script has not been received |
 | Starts by following the README; Docker Compose a plus | `docker-compose.yml`, `Dockerfile` | | Partial: the stack builds, seeds 1M and 10M, rebuilds and benchmarks through Compose on Linux; no clean-clone run recorded |
 

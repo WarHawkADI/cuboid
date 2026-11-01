@@ -105,6 +105,40 @@ func (f Freshness) AsOf() time.Time {
 	return f.CommitTime
 }
 
+// ReadFreshness returns how fresh the given stores' data is: the oldest of
+// their source databases, since an answer over several stores is only as
+// fresh as its stalest one. Without per-store databases every store shares
+// one source.
+func ReadFreshness(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, tenants []int32) (Freshness, error) {
+	rows, err := q.Query(ctx, `SELECT applied_lsn::text, applied_commit_time, heartbeat_time FROM cdc_sources
+		WHERE tenant_id = ANY($1) OR NOT EXISTS (SELECT 1 FROM cdc_sources WHERE tenant_id IS NOT NULL)`, tenants)
+	if err != nil {
+		return Freshness{}, err
+	}
+	defer rows.Close()
+	var oldest Freshness
+	first := true
+	for rows.Next() {
+		var f Freshness
+		var commit, hb *time.Time
+		if err := rows.Scan(&f.LSN, &commit, &hb); err != nil {
+			return Freshness{}, err
+		}
+		if commit != nil {
+			f.CommitTime = *commit
+		}
+		if hb != nil {
+			f.Heartbeat = *hb
+		}
+		if first || f.AsOf().Before(oldest.AsOf()) {
+			oldest, first = f, false
+		}
+	}
+	return oldest, rows.Err()
+}
+
 // ErrNoTenantContext means a read ran without its tenant setting. Row-level
 // security returns no rows in that case (it fails closed); Cuboid also
 // refuses the answer and records a security event.
@@ -129,24 +163,16 @@ func (s *Store) ReadTx(ctx context.Context, tenants []int32, opt ReadOptions, fn
 	if opt.SkipTenantContext {
 		setting = ""
 	}
-	var f Freshness
-	var applied string
-	var commit, hb *time.Time
 	var got string
-	err = tx.QueryRow(ctx, `SELECT set_config('cuboid.tenant_ids', $1, true), applied_lsn::text, applied_commit_time, heartbeat_time FROM cdc_state`, setting).
-		Scan(&got, &applied, &commit, &hb)
-	if err != nil {
+	if err := tx.QueryRow(ctx, `SELECT set_config('cuboid.tenant_ids', $1, true)`, setting).Scan(&got); err != nil {
 		return err
 	}
 	if got == "" {
 		return ErrNoTenantContext
 	}
-	f.LSN = applied
-	if commit != nil {
-		f.CommitTime = *commit
-	}
-	if hb != nil {
-		f.Heartbeat = *hb
+	f, err := ReadFreshness(ctx, tx, tenants)
+	if err != nil {
+		return err
 	}
 	if err := fn(tx, f); err != nil {
 		return err

@@ -7,6 +7,9 @@ On 20 March 2023, ChatGPT used redis-py's asyncio client with Redis Cluster to c
 
 Cuboid's response guard is that redundant check, built in from the start, and the drill below proves it fires.
 
+## Before the six checks: separation at the source
+Each store's rows sit in their own database (ADR-012), and every table there carries `CHECK (tenant_id = <store>)`: the database refuses a row of another store, which red-team check R8 shows. Cuboid attributes every row it streams or loads to the store whose database it came from, whatever the row says, and records a security event if they differ. The aggregate store is the one place stores' data sits together, which is why the six checks below guard it.
+
 ## The six checks
 | # | Check | What it does | Code |
 |---|---|---|---|

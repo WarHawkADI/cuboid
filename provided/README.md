@@ -6,7 +6,7 @@ Put their files here. This folder's other contents stay out of git. Their script
 
    `docker compose --profile provided run --rm provided-seed --tier small`
 
-2. Map their tables in `config/metrics.yaml`: the sources, measures, dimensions and rollups. If the schema differs from the fallback's, the store app and seed do not apply, but the engine reads only that file.
+2. Map their tables in `config/metrics.yaml`: the sources, measures, dimensions and rollups. If their script puts each store in its own database, set `tenancy.databases` to its naming (ADR-012); if it puts every store in one database, remove `tenancy.databases` and Cuboid streams that one database (that mode is in the code, but has not been re-tested since ADR-012). If the schema differs from the fallback's, the store app and seed do not apply, but the engine reads only that file.
 
 3. Rebuild from the main database, so the first load uses one consistent snapshot: `make rebuild`.
 

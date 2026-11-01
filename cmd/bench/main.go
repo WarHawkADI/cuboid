@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	_ "time/tzdata" // the runtime image has no zone database; Asia/Kolkata must load anyway
 )
 
 func env(k, d string) string {

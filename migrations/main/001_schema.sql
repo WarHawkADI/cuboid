@@ -1,16 +1,22 @@
--- MAIN database: the store platform's own database (fallback schema, Section 7.2).
+-- MAIN database server: the store platform's own databases (fallback schema, Section 7.2).
 -- Runs once, as the superuser, when the maindb container initialises.
 -- Passwords are documented development defaults for a local, offline stack.
+--
+-- Each store's orders, products, customers and alerts sit in their own database
+-- (ADR-012). This database, shop, is the platform's: the registry of stores and
+-- companies. store_template is the schema every store database is created from:
+-- the seed runs CREATE DATABASE store_<id> TEMPLATE store_template, then pins
+-- every table to that one store with a CHECK constraint.
 
 ALTER DATABASE shop SET timezone TO 'Asia/Kolkata';
 SET timezone TO 'Asia/Kolkata';
 
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
--- Roles: each program gets only what it needs.
+-- Roles are shared by every database on the server: each program gets only what it needs.
 CREATE ROLE app            LOGIN PASSWORD 'app';                       -- the store app (storesim)
 CREATE ROLE cuboid_cdc     LOGIN REPLICATION PASSWORD 'cuboid_cdc';    -- logical replication + snapshot backfill
-CREATE ROLE cuboid_verify  LOGIN PASSWORD 'cuboid_verify' CONNECTION LIMIT 3;  -- budgeted direct checks
+CREATE ROLE cuboid_verify  LOGIN PASSWORD 'cuboid_verify' CONNECTION LIMIT 8;  -- budgeted direct checks, one store at a time
 CREATE ROLE naive_dash     LOGIN PASSWORD 'naive_dash';                -- the "direct" baseline only
 ALTER ROLE cuboid_verify SET statement_timeout = '5s';
 ALTER ROLE cuboid_verify SET default_transaction_read_only = on;
@@ -20,11 +26,31 @@ CREATE TABLE companies (
   name       text NOT NULL
 );
 
-CREATE TABLE tenants (                     -- a tenant is a store
+CREATE TABLE tenants (                     -- a tenant is a store; its data is in database store_<tenant_id>
   tenant_id  int PRIMARY KEY,
   company_id int NOT NULL REFERENCES companies,
   name       text NOT NULL
 );
+
+-- A bulk data load sets this; Cuboid and the store app wait, and Cuboid then
+-- takes one consistent snapshot of each store instead of streaming millions of rows.
+CREATE TABLE seed_status (id int PRIMARY KEY DEFAULT 1 CHECK (id = 1), loading boolean NOT NULL DEFAULT false);
+INSERT INTO seed_status DEFAULT VALUES;
+
+ALTER TABLE tenants REPLICA IDENTITY FULL;
+
+CREATE PUBLICATION cuboid_pub FOR TABLE tenants, companies
+  WITH (publish = 'insert, update, delete, truncate');
+
+GRANT SELECT ON tenants, companies, seed_status TO app;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO cuboid_cdc, cuboid_verify, naive_dash;
+GRANT EXECUTE ON FUNCTION pg_logical_emit_message(boolean, text, text) TO cuboid_cdc;
+GRANT pg_read_all_stats TO cuboid_verify;
+
+-- The schema of one store's database.
+CREATE DATABASE store_template IS_TEMPLATE true;
+\connect store_template
+SET timezone TO 'Asia/Kolkata';
 
 CREATE TABLE customers (
   tenant_id   int    NOT NULL,
@@ -78,24 +104,16 @@ CREATE TABLE soc_alerts (
   PRIMARY KEY (tenant_id, alert_id)
 );
 
--- A bulk data load sets this; Cuboid and the store app wait, and Cuboid then
--- takes one consistent snapshot instead of streaming millions of rows.
-CREATE TABLE seed_status (id int PRIMARY KEY DEFAULT 1 CHECK (id = 1), loading boolean NOT NULL DEFAULT false);
-INSERT INTO seed_status DEFAULT VALUES;
-
 -- Retractions need the full old row on UPDATE and DELETE (ADR-003).
 ALTER TABLE orders     REPLICA IDENTITY FULL;
 ALTER TABLE soc_alerts REPLICA IDENTITY FULL;
 ALTER TABLE products   REPLICA IDENTITY FULL;   -- rare updates; lets a recategorisation be detected exactly
 ALTER TABLE customers  REPLICA IDENTITY FULL;
-ALTER TABLE tenants    REPLICA IDENTITY FULL;
 
-CREATE PUBLICATION cuboid_pub FOR TABLE orders, products, customers, tenants, companies, soc_alerts
+CREATE PUBLICATION cuboid_pub FOR TABLE orders, products, customers, soc_alerts
   WITH (publish = 'insert, update, delete, truncate');
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON orders, customers, products, soc_alerts TO app;
 GRANT TRUNCATE ON orders TO app;   -- the truncate-and-reload scenario (B-2 auto-rebuild demo)
-GRANT SELECT ON tenants, companies TO app;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO cuboid_cdc, cuboid_verify, naive_dash;
 GRANT EXECUTE ON FUNCTION pg_logical_emit_message(boolean, text, text) TO cuboid_cdc;
-GRANT pg_read_all_stats TO cuboid_verify;

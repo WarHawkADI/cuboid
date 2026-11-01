@@ -3,6 +3,8 @@ package cdc
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +61,96 @@ func ConnectPlain(ctx context.Context, dsn, app string) (*pgx.Conn, error) {
 	delete(cfg.RuntimeParams, "replication")
 	cfg.RuntimeParams["application_name"] = app
 	return pgx.ConnectConfig(ctx, cfg)
+}
+
+// WithDatabase returns dsn with its database replaced: a store's own database
+// on the same server, reached with the same role (ADR-012). It accepts URL and
+// key=value DSNs.
+func WithDatabase(dsn, db string) (string, error) {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		u, err := url.Parse(dsn)
+		if err != nil {
+			return "", fmt.Errorf("parse DSN: %w", err)
+		}
+		u.Path = "/" + db
+		return u.String(), nil
+	}
+	if dbname.MatchString(dsn) {
+		return dbname.ReplaceAllLiteralString(dsn, "dbname="+db), nil
+	}
+	return strings.TrimSpace(dsn + " dbname=" + db), nil
+}
+
+var dbname = regexp.MustCompile(`dbname=\S+`)
+
+// Slots reads the health of every replication slot whose name starts with
+// prefix, by slot name. Slots are server-wide, so any database can read them.
+func (e *Emitter) Slots(ctx context.Context, prefix string) (map[string]SlotHealth, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.conn == nil || e.conn.IsClosed() {
+		c, err := ConnectPlain(ctx, e.dsn, "cuboid-emitter")
+		if err != nil {
+			return nil, err
+		}
+		e.conn = c
+	}
+	rows, err := e.conn.Query(ctx, `SELECT slot_name, active, coalesce(wal_status, ''),
+			coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn), 0)::bigint,
+			coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), confirmed_flush_lsn), 0)::bigint,
+			safe_wal_size, coalesce(confirmed_flush_lsn::text, '')
+		FROM pg_replication_slots WHERE slot_name LIKE $1 || '%'`, prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]SlotHealth{}
+	for rows.Next() {
+		var name string
+		h := SlotHealth{Exists: true}
+		if err := rows.Scan(&name, &h.Active, &h.WALStatus, &h.RetainedWAL, &h.LagBytes, &h.SafeWALBytes, &h.ConfirmedLSN); err != nil {
+			return nil, err
+		}
+		out[name] = h
+	}
+	return out, rows.Err()
+}
+
+// Databases returns the names of the databases on the server.
+func (e *Emitter) Databases(ctx context.Context) (map[string]bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.conn == nil || e.conn.IsClosed() {
+		c, err := ConnectPlain(ctx, e.dsn, "cuboid-emitter")
+		if err != nil {
+			return nil, err
+		}
+		e.conn = c
+	}
+	rows, err := e.conn.Query(ctx, "SELECT datname FROM pg_database WHERE datallowconn")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out[n] = true
+	}
+	return out, rows.Err()
+}
+
+// Close closes the emitter's connection.
+func (e *Emitter) Close() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.conn != nil {
+		e.conn.Close(context.Background())
+		e.conn = nil
+	}
 }
 
 // Emitter writes heartbeats and fences into the WAL with
@@ -138,34 +230,6 @@ type SlotHealth struct {
 	LagBytes     int64 // bytes between confirmed_flush_lsn and the current WAL position
 	SafeWALBytes *int64
 	ConfirmedLSN string
-}
-
-// Health reads the slot's state.
-func (e *Emitter) Health(ctx context.Context, slot string) (SlotHealth, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	var h SlotHealth
-	if e.conn == nil || e.conn.IsClosed() {
-		c, err := ConnectPlain(ctx, e.dsn, "cuboid-emitter")
-		if err != nil {
-			return h, err
-		}
-		e.conn = c
-	}
-	err := e.conn.QueryRow(ctx, `SELECT active, coalesce(wal_status, ''),
-			coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn), 0)::bigint,
-			coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), confirmed_flush_lsn), 0)::bigint,
-			safe_wal_size, coalesce(confirmed_flush_lsn::text, '')
-		FROM pg_replication_slots WHERE slot_name = $1`, slot).
-		Scan(&h.Active, &h.WALStatus, &h.RetainedWAL, &h.LagBytes, &h.SafeWALBytes, &h.ConfirmedLSN)
-	if err == pgx.ErrNoRows {
-		return h, nil
-	}
-	if err != nil {
-		return h, err
-	}
-	h.Exists = true
-	return h, nil
 }
 
 // DropSlot drops a slot if it exists and is not in use.

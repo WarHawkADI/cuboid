@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	_ "time/tzdata" // the runtime image has no zone database; Asia/Kolkata must load anyway
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -42,7 +43,8 @@ type entry struct {
 }
 
 type server struct {
-	pool   *pgxpool.Pool
+	dsn    *pgxpool.Config // naive_dash; each store's queries run in its own database
+	pools  sync.Map        // database -> *pgxpool.Pool
 	cfg    *config.Config
 	parser *query.Parser
 	loc    *time.Location
@@ -70,15 +72,9 @@ func main() {
 		log.Error("dsn", "err", err)
 		os.Exit(1)
 	}
-	pcfg.MaxConns = 40
 	pcfg.ConnConfig.RuntimeParams["application_name"] = "naive-dashboards"
-	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
-	if err != nil {
-		log.Error("connect", "err", err)
-		os.Exit(1)
-	}
 	loc, _ := time.LoadLocation(env("NAIVE_TZ", "Asia/Kolkata"))
-	s := &server{pool: pool, cfg: cfg, loc: loc, ttl: 60 * time.Second, entries: map[string]entry{},
+	s := &server{dsn: pcfg, cfg: cfg, loc: loc, ttl: 60 * time.Second, entries: map[string]entry{},
 		parser: &query.Parser{Cfg: cfg, Loc: loc, Now: time.Now}}
 	s.cache.Store(env("NAIVE_CACHE", "false") == "true")
 	mux := http.NewServeMux()
@@ -106,6 +102,33 @@ func main() {
 	}()
 	<-ctx.Done()
 	srv.Shutdown(context.Background())
+}
+
+// poolFor returns the pool of a store's own database (ADR-012), or of the
+// one database every store shares when the config has no per-store databases.
+// Forty connections in all, as a careful team would give a shared database.
+func (s *server) poolFor(ctx context.Context, tenant int32) (*pgxpool.Pool, error) {
+	db := s.dsn.ConnConfig.Database
+	conns := int32(40)
+	if s.cfg.PerStore() {
+		db, conns = s.cfg.StoreDatabase(tenant), 4
+	}
+	if p, ok := s.pools.Load(db); ok {
+		return p.(*pgxpool.Pool), nil
+	}
+	cfg := s.dsn.Copy()
+	cfg.ConnConfig.Database = db
+	cfg.MaxConns = conns
+	cfg.MaxConnIdleTime = time.Minute
+	p, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if actual, loaded := s.pools.LoadOrStore(db, p); loaded {
+		p.Close()
+		return actual.(*pgxpool.Pool), nil
+	}
+	return p, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -161,7 +184,13 @@ func (s *server) query(w http.ResponseWriter, r *http.Request) {
 	sql, args := verify.DirectSQL(s.cfg, &q, s.loc)
 	s.inFlight.Add(1)
 	start := time.Now()
-	rows, err := s.pool.Query(r.Context(), sql, args...)
+	pool, err := s.poolFor(r.Context(), int32(id))
+	if err != nil {
+		writeJSON(w, 503, map[string]string{"error": err.Error()})
+		s.inFlight.Add(-1)
+		return
+	}
+	rows, err := pool.Query(r.Context(), sql, args...)
 	var n int
 	if err == nil {
 		for rows.Next() {

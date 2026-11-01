@@ -32,6 +32,42 @@ type Config struct {
 type Tenancy struct {
 	TenantColumn string      `yaml:"tenant_column"`
 	Company      *CompanyRef `yaml:"company"`
+	// Databases, when set, puts each store's data in its own database on the
+	// main server (ADR-012). The main DSN's database is then the platform's:
+	// it holds only the company table, the registry of stores.
+	Databases *Databases `yaml:"databases"`
+}
+
+// Databases names a store's database and the template they share.
+type Databases struct {
+	Store    string `yaml:"store"`    // pattern with {tenant}, for example store_{tenant}
+	Template string `yaml:"template"` // the schema every store database is created from
+}
+
+// PerStore reports whether each store's data sits in its own database.
+func (c *Config) PerStore() bool { return c.Tenancy.Databases != nil }
+
+// StoreDatabase is the name of a store's database.
+func (c *Config) StoreDatabase(tenant int32) string {
+	return strings.ReplaceAll(c.Tenancy.Databases.Store, "{tenant}", strconv.Itoa(int(tenant)))
+}
+
+// OnPlatform reports whether a source table sits in the main DSN's database:
+// every table without per-store databases, else only the store registry.
+func (c *Config) OnPlatform(source string) bool {
+	return !c.PerStore() || source == c.Tenancy.Company.Table
+}
+
+// SourcesOn returns the source tables in the platform database (platform
+// true) or in each store's database, in declared order.
+func (c *Config) SourcesOn(platform bool) []*Source {
+	var out []*Source
+	for _, s := range c.Sources.Values() {
+		if c.OnPlatform(s.Name) == platform {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // CompanyRef names the table that maps each tenant to its company.
@@ -315,6 +351,19 @@ func (c *Config) validate() error {
 	if tc := c.Tenancy.Company; tc != nil {
 		if c.Sources.Get(tc.Table) == nil {
 			return fmt.Errorf("tenancy.company.table %q is not a source; add it under sources so it is mirrored", tc.Table)
+		}
+	}
+	if db := c.Tenancy.Databases; db != nil {
+		switch {
+		case c.Tenancy.Company == nil:
+			return fmt.Errorf("tenancy.databases needs tenancy.company: its table is the registry that lists the stores")
+		case !strings.Contains(db.Store, "{tenant}"):
+			return fmt.Errorf("tenancy.databases.store %q must contain {tenant}, for example store_{tenant}", db.Store)
+		case db.Template == "":
+			return fmt.Errorf("tenancy.databases.template is required: the database whose schema every store's shares")
+		}
+		if t := c.Sources.Get(c.Tenancy.Company.Table); t != nil && t.Time != "" {
+			return fmt.Errorf("source %s is the store registry and sits in the platform database, so it cannot be a fact source", t.Name)
 		}
 	}
 	for _, s := range c.Sources.Values() {

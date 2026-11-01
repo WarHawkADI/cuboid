@@ -22,9 +22,11 @@ The hardest questions we expect, each with a short answer and where to show it.
 
 10. **What does replication cost the main database?** Extra WAL for `REPLICA IDENTITY FULL` on updates and deletes, which we have not yet measured, plus retained WAL if Cuboid falls behind, capped at 4 GB. *Show: ADR-003.*
 
-11. **What happens during a rebuild?** Queries keep answering from the old tables, labelled with their true age. A rebuild from main pauses the stream and took about 10 minutes at 10M, with 0 failed queries; writes made meanwhile are applied afterwards. *Show: rebuild control.*
+11. **What happens during a rebuild?** Queries keep answering from the old numbers, labelled with their true age. Each store reloads from its own database in its own transaction, four at a time, while every other store keeps streaming: one store's TRUNCATE or lost slot reloads only that store. *Show: rebuild control, ADR-012.*
 
 12. **Would it survive 1,000 clients?** Not proven. We tested 100. The path is a design: shard slots, partition by tenant hash, stateless query nodes. *Show: ADR-010.*
+
+12a. **Does each store have its own database, as the PRD says?** Yes. Each store's orders, products and customers sit in their own database, pinned to that store by CHECK constraints, so another store's row cannot be written there. Cuboid streams each database on its own; a new store streams within seconds of being registered. Company dashboards combine their stores' databases. *Show: `psql ... store_42`, ADR-012.*
 
 13. **Could it serve our SOC data?** The `soc_alerts` table runs on the same engine through config, with its numbers matching the main database. It is synthetic data. *Show: `config/metrics.yaml`.*
 

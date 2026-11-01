@@ -6,7 +6,7 @@ Dashboards must stay fresh without loading the main database.
 
 ## Decision
 
-Read changes through a `pgoutput` logical replication slot. Backfill from the slot's exported snapshot, so there is no gap and no overlap.
+Read changes through a `pgoutput` logical replication slot. Backfill from the slot's exported snapshot, so there is no gap and no overlap. Since ADR-012, each store's database has its own slot, read the same way.
 
 ## Alternatives
 

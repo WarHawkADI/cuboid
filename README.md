@@ -19,7 +19,7 @@
   <img alt="Tested at" src="https://img.shields.io/badge/tested%20at-10M%20orders%2C%20100%20stores-2846C4">
 </p>
 
-**Cuboid sits between the database and the dashboards.** It reads the main database's change stream, keeps exact pre-computed rollups in a separate Postgres, and answers counts, trends, top-N lists and breakdowns in milliseconds for each store. Every number can be checked against the live database, and the checks that keep stores apart are tested by injecting real faults into its own code.
+**Cuboid sits between the stores' databases and the dashboards.** Each store's orders, products and customers sit in its own database. Cuboid reads every one of them through its own change stream, keeps exact pre-computed rollups in a separate Postgres, and answers counts, trends, top-N lists and breakdowns in milliseconds for each store and each company. Every number can be checked against the live database, and the checks that keep stores apart are tested by injecting real faults into its own code.
 
 ## See it run
 
@@ -58,7 +58,7 @@ docker compose up -d --build
 docker compose --profile seed run --rm seed
 ```
 
-Then open <http://localhost:8080/monitor>. The seed loads 1M orders across 10 stores, and Cuboid then loads a snapshot of them, which took under a minute on our laptop. For the main tier use `SEED_TIER=main`, which took about 12 minutes in total.
+Then open <http://localhost:8080/monitor>. The seed creates a database for each of 10 stores and loads 1M orders across them; Cuboid then loads a snapshot of each store, four at a time, which took 43 s. For the main tier use `SEED_TIER=main`, which took about 12 minutes in total.
 
 Settings can be changed through `.env`; see `.env.example`. The organisers' data script goes in `provided/`; see `provided/README.md`.
 
@@ -103,7 +103,7 @@ Ranges: `from` (inclusive) and `to` (exclusive), or `range=today|yesterday|this_
 
 ### The PRD's four examples
 
-Every response echoes the absolute `from` and `to` it used. Presets move with the clock, so use those instants in your own SQL. To compare, connect with `psql -h localhost -p 5433 -U postgres shop`.
+Every response echoes the absolute `from` and `to` it used. Presets move with the clock, so use those instants in your own SQL. To compare, connect to the store's own database: `psql -h localhost -p 5433 -U postgres store_42`.
 
 Number of orders and total sales in the last 7 days:
 
@@ -155,7 +155,7 @@ curl -X POST -H "Authorization: Bearer $KEY" localhost:8080/tenants/42/verify \
 
 ## Try FR-6 yourself
 
-Insert an order in psql, in a minute that has no other orders:
+Insert an order in store 42's database (`psql -h localhost -p 5433 -U postgres store_42`), in a minute that has no other orders:
 
 ```sql
 INSERT INTO orders (tenant_id, order_id, customer_id, product_id, quantity, amount_paise, status, payment_method, channel, created_at, updated_at)
@@ -186,6 +186,8 @@ Measured at 10M orders and 100 stores, with every service sharing one laptop (12
 | Correctness | Most queries | All queries | 2,500 of 2,500 exact, 500 of them during writes | **Great** |
 | Growth | Under 5x | Under 2x | Largest store: 1.2x to 3.2x for PRD examples. Top customers: 3.7x | **Good** |
 
+The scorecard above was measured with all stores in one database. With a database per store (ADR-012) at 10M, the same machine also runs 101 replication streams: every query's p99 across stores stayed under 63 ms and 1,000 dashboards' p99 at 1.6 ms, but the largest store's slowest top-customers answer was 308 ms, over the 200 ms Great line. Correctness (150 of 150) and freshness (p99 1.07 s) held.
+
 <p align="center"><img src="docs/img/growth.svg" alt="Growth from 1M to 10M orders on the largest store: 1.2x to 3.2x on most queries, 3.7x on top customers" width="90%"></p>
 
 The two weak spots, plainly:
@@ -200,7 +202,7 @@ Also measured at 10M: 1,000,000 randomized requests with 0 crossing stores, and 
 | Bonus | How to see it |
 |---|---|
 | B-1 Freshness | `freshness` in every response: `"updated": "updated 1 second ago"` |
-| B-2 Rebuild from scratch | Controls on `/monitor`: from the mirror with no main-database load, or from main. Queries keep answering; on a rebuild from main the stream pauses and answers show their true age |
+| B-2 Rebuild from scratch | Controls on `/monitor`: from the mirror with no main-database load, or from each store's database. Queries keep answering; each store reloads in its own transaction while the others keep streaming |
 | B-3 Heavy-query limit | "Flood heavy queries" on `/monitor`: the flooding store gets 429s, others' p99 stayed flat |
 | B-4 Metric by config | Add a rollup to `config/metrics.yaml` while running. It builds from the mirror and is served without a restart. A `rank: true` rollup (see `customer_month`) speeds up a top-N list, and a measure declared `nonnegative: true` is checked against the main database's `CHECK` constraints |
 | B-5 Monitoring page | `/monitor` |
@@ -239,6 +241,9 @@ sequenceDiagram
 
 ### Top customers without reading every customer
 A customer list used to read one cell per customer and day in the range, so it grew with the store: 13.7x from 1M to 10M orders. A rank rollup now keeps each customer's total per month. The range splits into whole-month cells plus thin signed slices of rows, and a walk down each month's largest cells stops once no one else can reach the n-th total. It reads a few hundred customers and returns the same list as ranking all of them, ties included. `meta.plan.top_bound` shows when it ran. The proof and the limits are in [ADR-011](docs/adr/ADR-011-exact-top-n.md).
+
+### Each store in its own database
+Each store's data sits in its own database, created from a template and pinned to that store by `CHECK` constraints, so no row of another store can be written there. Cuboid streams each database with its own slot and position. A `TRUNCATE`, a lost slot or a failed check reloads only that store, and stores load in parallel, each in one transaction. A store added to the registry is streaming within seconds, with no restart. See [ADR-012](docs/adr/ADR-012-database-per-store.md).
 
 ### Any time range, exact
 <p align="center"><img src="docs/img/range-slice.svg" alt="A range is tiled with mirror edges, hours, days and months" width="100%"></p>
@@ -280,10 +285,12 @@ flowchart LR
 |---|---|---|
 | Cuboid is killed under writes | Resumes from its committed position | 20 kills, back within 3.1 s, 500 of 500 exact |
 | The biggest store floods heavy queries | That store gets 429s, others stay flat | Over 3,500 limited, others' p99 under 3 ms |
-| A number looks wrong | Check it against the main database, then rebuild | 0 failed queries during rebuilds at 10M |
+| A number looks wrong | Check it against the store's database, then reload that store | 0 failed queries during rebuilds at 10M |
+| A store's table is truncated, or its slot is lost | Only that store reloads from its database; every other store keeps streaming | 1M: store 43 truncated and store 44's slot dropped, no other store reloaded or stopped |
+| A store is added or removed | Streamed within seconds, or purged, with no restart | 1M: a new store streaming 2.7 s after it was registered |
 | A bad config is saved | The old config stays live, and the error names the line | Config tests |
 | The aggregate store is too busy | The last exact answer is served, labelled with its age | Dashboards' p99 3 ms under load |
-| A replication slot falls behind | An alarm at 1 GB, and a 4 GB cap protects the main database's disk | Set and coded; not forced in a test |
+| A replication slot falls behind | An alarm at 1 GB naming the slot, and a 4 GB cap protects the main server's disk | Set and coded; not forced in a test |
 
 ### The techniques the PRD names
 
@@ -292,7 +299,7 @@ flowchart LR
 | Indexing | Cells keyed and stored by store, rollup, grain and bucket |
 | Pre-computing | Exact rollups, retractable under updates and deletes |
 | Caching | Per-store partitions with range-aware validity, refreshed in the background |
-| Streams | Logical replication with a one-second flush. No polling, no triggers |
+| Streams | Logical replication, one stream per store's database, with a one-second flush. No polling, no triggers |
 | Measuring | `cmd/bench` writes every number to `artifacts/` |
 
 Full design and failure modes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Decisions and their alternatives: [docs/adr/](docs/adr/).

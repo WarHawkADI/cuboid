@@ -17,11 +17,14 @@ A check writes a fence into the WAL and takes a snapshot on the main database. W
 **Has that check ever caught anything?**
 Yes. It found a real bug that lost orders: a commit written straight after a heartbeat shares its LSN, and was treated as already applied. See `docs/POSTGRES_NOTES.md`.
 
+**Is each store's data in its own database?**
+Yes, as the PRD's setting describes. The platform database holds the registry of stores and companies; each store's orders, products, customers and alerts sit in `store_<id>`, created from a template and pinned to the store by CHECK constraints. Cuboid streams each database with its own slot and position, loads stores in parallel, and reloads only the affected store after a TRUNCATE, a lost slot or a failed check. Company dashboards and checks span their stores' databases. See ADR-012.
+
 **What does `REPLICA IDENTITY FULL` cost?**
 More WAL on updates and deletes, since each carries the old row. Inserts are unaffected. We have not measured the cost yet. The alternative is reading old rows from the mirror (ADR-003).
 
 **What happens if Cuboid is down for an hour?**
-Dashboards stop being served, because Cuboid serves them. The app is unaffected. The slot holds WAL meanwhile, with an alarm at 1 GB and a 4 GB cap that protects the main database's disk. On restart it resumes from its committed position and catches up. If the cap is passed, the slot is lost, and Cuboid rebuilds from a snapshot. A one-hour outage has not been run; shorter stops and 20 kills at 10M have.
+Dashboards stop being served, because Cuboid serves them. The app is unaffected. Each store's slot holds WAL meanwhile, with an alarm at 1 GB and a 4 GB cap that protects the main server's disk. On restart every store resumes from its committed position and catches up. If the cap is passed, a store's slot is lost, and Cuboid reloads that store from a snapshot of its database. A one-hour outage has not been run; shorter stops and 20 kills at 10M have.
 
 **What does a restart cost the app?**
 While Cuboid catches up, the app is measurably slower on one machine, because both databases share a disk. We saw app p95 rise well above baseline just after a restart, then fall as it settled. Separate machines would remove most of that overlap. We have not tested that.

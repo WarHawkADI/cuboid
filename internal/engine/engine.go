@@ -47,6 +47,7 @@ type Change struct {
 
 // Txn is one committed source transaction.
 type Txn struct {
+	Source     string // the source database it was committed in
 	Xid        uint32
 	CommitLSN  uint64
 	CommitTime time.Time
@@ -419,6 +420,16 @@ func (e *Engine) SeedDimension(k DimKey, r Row) { e.dims[k] = r }
 
 // ForgetDimensions drops the dimension cache (after a rebuild from main).
 func (e *Engine) ForgetDimensions() { e.dims = map[DimKey]Row{} }
+
+// ForgetTenant drops one store's cached dimension rows, after that store alone
+// was reloaded from its database.
+func (e *Engine) ForgetTenant(tenant int32) {
+	for k := range e.dims {
+		if k.Tenant == tenant {
+			delete(e.dims, k)
+		}
+	}
+}
 
 func (e *Engine) contribute(src *config.Source, f *Fact, sign int64, d *Delta) {
 	e.contributeTo(e.cfg.RollupsFor(src.Name), f, sign, d)

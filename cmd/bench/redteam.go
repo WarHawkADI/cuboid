@@ -78,11 +78,23 @@ func runRedTeam(ctx context.Context, w *world) bool {
 		add("W9", "SOC alerts match the main database", err == nil && ok, det+errText(err))
 	}
 
-	mainDB, err := pgx.Connect(ctx, env("BENCH_MAIN_DSN", "postgres://postgres:postgres@localhost:5433/shop"))
-	if err != nil {
-		fatal(err)
+	// Each store's rows sit in its own database (ADR-012): store_<id>, as
+	// tenancy.databases in config/metrics.yaml names it.
+	storeDB := func(id int32) *pgx.Conn {
+		cfg, err := pgx.ParseConfig(env("BENCH_MAIN_DSN", "postgres://postgres:postgres@localhost:5433/shop"))
+		if err != nil {
+			fatal(err)
+		}
+		cfg.Database = fmt.Sprintf("store_%d", id)
+		conn, err := pgx.ConnectConfig(ctx, cfg)
+		if err != nil {
+			fatal(err)
+		}
+		return conn
 	}
+	mainDB, otherDB := storeDB(big.ID), storeDB(other.ID)
 	defer mainDB.Close(ctx)
+	defer otherDB.Close(ctx)
 	reader, err := pgx.Connect(ctx, env("BENCH_AGG_READER_DSN", "postgres://cuboid_reader:cuboid_reader@localhost:5434/agg"))
 	if err != nil {
 		fatal(err)
@@ -171,26 +183,40 @@ func runRedTeam(ctx context.Context, w *world) bool {
 	mainDB.Exec(ctx, "UPDATE customers SET city = $3 WHERE tenant_id = $1 AND customer_id = $2", big.ID, cid, oldCity)
 	stable(scope, "orders/breakdown", map[string]string{"by": "city", "range": "last_30d"})
 
-	// R8: an order moved to another store: both stores corrected, event raised.
+	// R8: separation at the source. A store's database refuses a row of
+	// another store, so an order cannot be re-labelled into another's numbers.
 	var oid int64
 	if err := mainDB.QueryRow(ctx, "SELECT order_id FROM orders WHERE tenant_id = $1 AND created_at > now() - interval '3 days' LIMIT 1", big.ID).Scan(&oid); err != nil {
 		fatal(err)
 	}
 	newID := int64(9_000_000_000) + time.Now().Unix()
-	if _, err := mainDB.Exec(ctx, "UPDATE orders SET tenant_id = $3, order_id = $4 WHERE tenant_id = $1 AND order_id = $2", big.ID, oid, other.ID, newID); err != nil {
+	_, err = mainDB.Exec(ctx, "UPDATE orders SET tenant_id = $3, order_id = $4 WHERE tenant_id = $1 AND order_id = $2", big.ID, oid, other.ID, newID)
+	add("R8", "A store's database refuses another store's row", err != nil && strings.Contains(err.Error(), "one_store"), errText(err))
+	// A real move is two changes in two databases: out of one store, into the other.
+	tx2, err := mainDB.Begin(ctx)
+	if err != nil {
+		fatal(err)
+	}
+	var moved [11]any
+	err = tx2.QueryRow(ctx, `DELETE FROM orders WHERE tenant_id = $1 AND order_id = $2 RETURNING customer_id, product_id, quantity, amount_paise,
+		status, payment_method, channel, created_at, updated_at`, big.ID, oid).Scan(&moved[2], &moved[3], &moved[4], &moved[5], &moved[6], &moved[7], &moved[8], &moved[9], &moved[10])
+	if err == nil {
+		moved[0], moved[1] = other.ID, newID
+		_, err = otherDB.Exec(ctx, `INSERT INTO orders (tenant_id, order_id, customer_id, product_id, quantity, amount_paise, status, payment_method, channel, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, moved[:]...)
+	}
+	if err == nil {
+		err = tx2.Commit(ctx)
+	} else {
+		tx2.Rollback(ctx)
+	}
+	if err != nil {
 		fatal(err)
 	}
 	ok, det = stable(scope, "orders/summary", map[string]string{"range": "last_7d"})
 	ok2, det2 := stable(fmt.Sprintf("/tenants/%d", other.ID), "orders/summary", map[string]string{"range": "last_7d"})
-	add("R8", "Order moved between stores: both exact", ok && ok2, det+"; "+det2)
-	raised := false
-	var dbEvents int64
-	if aggW != nil {
-		aggW.QueryRow(ctx, "SELECT count(*) FROM security_events WHERE kind = 'tenant_reassignment' AND at > now() - interval '2 minutes'").Scan(&dbEvents)
-		raised = dbEvents > 0
-	}
-	add("R8", "Security event raised for the move", raised, fmt.Sprintf("%d events", dbEvents))
-	mainDB.Exec(ctx, "DELETE FROM orders WHERE tenant_id = $1 AND order_id = $2", other.ID, newID)
+	add("R8", "Order moved between stores' databases: both exact", ok && ok2, det+"; "+det2)
+	otherDB.Exec(ctx, "DELETE FROM orders WHERE tenant_id = $1 AND order_id = $2", other.ID, newID)
 
 	// Bulk update in one transaction, reflected atomically.
 	var bulk struct {

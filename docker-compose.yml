@@ -19,12 +19,15 @@ services:
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: shop
+    # One database per store (ADR-012): a replication slot, a WAL sender and a
+    # stream per store, two of each while a store reloads; each stream decodes
+    # with a small buffer.
     command: >
       postgres
-      -c wal_level=logical -c max_replication_slots=10 -c max_wal_senders=10 -c max_slot_wal_keep_size=4GB
+      -c wal_level=logical -c max_replication_slots=250 -c max_wal_senders=250 -c max_slot_wal_keep_size=4GB
       -c shared_preload_libraries=pg_stat_statements -c track_io_timing=on -c timezone=Asia/Kolkata
       -c shared_buffers=1GB -c effective_cache_size=3GB -c work_mem=32MB -c maintenance_work_mem=512MB
-      -c max_connections=300 -c logical_decoding_work_mem=256MB -c max_wal_size=4GB
+      -c max_connections=800 -c logical_decoding_work_mem=16MB -c max_wal_size=4GB
     volumes:
       - ./migrations/main:/docker-entrypoint-initdb.d:ro
       - maindata:/var/lib/postgresql/data

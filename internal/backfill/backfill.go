@@ -1,8 +1,9 @@
-// Package backfill loads the aggregate store from a consistent snapshot of
-// the main database: every source table is streamed with COPY into the
-// mirror, then every rollup is built with set-based SQL on AGG. The main
-// database only serves sequential reads, and each chunk waits for the store
-// app's canary to be healthy first.
+// Package backfill loads the aggregate store from consistent snapshots of the
+// source databases, one source at a time (ADR-012): the platform's database,
+// or one store's. A load replaces everything the aggregate store holds from
+// that source in a single transaction, so readers see the old numbers or the
+// new ones, never a mix, and every other store keeps streaming meanwhile.
+// Stores load in parallel, each in its own transaction.
 package backfill
 
 import (
@@ -10,258 +11,277 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sort"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/sync/errgroup"
 
 	"cuboid/internal/cdc"
 	"cuboid/internal/config"
 	"cuboid/internal/store"
 )
 
-// Options configure one backfill.
-type Options struct {
-	MainDSN  string // cuboid_cdc
-	Snapshot string // exported by the slot creation
-	Store    *store.Store
-	Cfg      *config.Config
-	Specs    map[string]*store.Table
-	Names    store.Names
-	Loc      *time.Location
-	Now      func() time.Time
-	Workers  int
-	// Throttle blocks while the main database is under pressure (canary).
-	Throttle func(ctx context.Context)
-	Log      *slog.Logger
-	Progress func(phase string, done, total int64)
+// Source is one source database to load.
+type Source struct {
+	Name   string // the database
+	DSN    string // cuboid_cdc, on that database
+	Tenant int32  // the store whose database it is; 0 when rows carry their own
+	Tables []*config.Source
+	Slot   string // the replication slot to create; its stream resumes the source
 }
 
-// Stats summarise a backfill.
+// Options configure one load.
+type Options struct {
+	Store *store.Store
+	Cfg   *config.Config
+	Specs map[string]*store.Table
+	Loc   *time.Location
+	Now   func() time.Time
+	// Throttle blocks while the main server is under pressure (canary).
+	Throttle func(ctx context.Context)
+	Log      *slog.Logger
+}
+
+// Stats summarise a load.
 type Stats struct {
 	Rows      int64
 	CopyTime  time.Duration
 	BuildTime time.Duration
 }
 
-type chunk struct {
-	table  string
-	tenant int32
-}
-
-// Run performs the backfill into the tables named by o.Names.
-func Run(ctx context.Context, o Options) (Stats, error) {
+// Load creates the source's slot with an exported snapshot, copies the
+// source's tables from that snapshot, builds their rollups and records the
+// slot and its consistent point, all in one aggregate-store transaction. The
+// stream that resumes from the consistent point misses nothing and repeats
+// nothing. On failure the new slot is dropped and nothing changes.
+func Load(ctx context.Context, src Source, o Options) (pglogrepl.LSN, Stats, error) {
 	var st Stats
-	if o.Workers <= 0 {
-		o.Workers = 4
-	}
-	if err := truncate(ctx, o); err != nil {
-		return st, err
-	}
-	start := time.Now()
-	chunks, err := listChunks(ctx, o)
+	repl, err := cdc.ConnectReplication(ctx, src.DSN)
 	if err != nil {
-		return st, err
+		return 0, st, fmt.Errorf("connect to %s for replication: %w", src.Name, err)
 	}
-	o.Log.Info("backfill: copying from snapshot", "snapshot", o.Snapshot, "chunks", len(chunks))
-	work := make(chan chunk)
-	var rows, done atomic.Int64
-	g, gctx := errgroup.WithContext(ctx)
-	for w := 0; w < o.Workers; w++ {
-		g.Go(func() error { return worker(gctx, o, work, &rows, &done, int64(len(chunks))) })
+	defer repl.Close(context.Background())
+	stream := &cdc.Stream{Conn: repl, Slot: src.Slot}
+	consistent, snapshot, err := stream.CreateSlot(ctx, false)
+	if err != nil {
+		return 0, st, err
 	}
-	g.Go(func() error {
-		defer close(work)
-		for _, c := range chunks {
-			select {
-			case work <- c:
-			case <-gctx.Done():
-				return gctx.Err()
-			}
+	ok := false
+	defer func() {
+		if !ok {
+			dropSlot(src, o.Log)
 		}
-		return nil
-	})
-	if err := g.Wait(); err != nil {
-		return st, err
-	}
-	st.Rows = rows.Load()
-	st.CopyTime = time.Since(start)
-	o.Log.Info("backfill: mirror loaded", "rows", st.Rows, "took", st.CopyTime.Round(time.Millisecond))
-
-	start = time.Now()
-	if err := BuildAll(ctx, o.Store, o.Cfg, o.Loc, o.Now(), o.Names, nil, o.Cfg.Rollups.Values(), o.Progress); err != nil {
-		return st, err
-	}
-	st.BuildTime = time.Since(start)
-	o.Log.Info("backfill: rollups built", "took", st.BuildTime.Round(time.Millisecond))
-	return st, nil
-}
-
-func truncate(ctx context.Context, o Options) error {
-	var tables []string
-	for _, name := range o.Cfg.Sources.Keys() {
-		tables = append(tables, o.Names.Mirror(name))
-	}
-	for _, src := range o.Cfg.FactSources() {
-		tables = append(tables, o.Names.Cells(src.Name))
-	}
-	_, err := o.Store.W.Exec(ctx, "TRUNCATE "+strings.Join(tables, ", "))
-	return err
-}
-
-func snapshotTx(ctx context.Context, conn *pgx.Conn, snapshot string) (pgx.Tx, error) {
-	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	}()
+	// The exported snapshot lives while repl stays idle: every read below
+	// imports it on a connection of its own.
+	conn, err := cdc.ConnectPlain(ctx, src.DSN, "cuboid-backfill")
 	if err != nil {
-		return nil, err
+		return 0, st, err
 	}
-	if _, err := tx.Exec(ctx, fmt.Sprintf("SET TRANSACTION SNAPSHOT '%s'", strings.ReplaceAll(snapshot, "'", ""))); err != nil {
-		tx.Rollback(ctx)
-		return nil, fmt.Errorf("import snapshot %s: %w", snapshot, err)
-	}
-	return tx, nil
-}
-
-// listChunks splits every table by tenant, biggest tables first.
-func listChunks(ctx context.Context, o Options) ([]chunk, error) {
-	conn, err := cdc.ConnectPlain(ctx, o.MainDSN, "cuboid-backfill")
+	defer conn.Close(context.Background())
+	snap, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, err
+		return 0, st, err
 	}
-	defer conn.Close(ctx)
-	tx, err := snapshotTx(ctx, conn, o.Snapshot)
-	if err != nil {
-		return nil, err
+	defer snap.Rollback(context.Background())
+	if _, err := snap.Exec(ctx, fmt.Sprintf("SET TRANSACTION SNAPSHOT '%s'", strings.ReplaceAll(snapshot, "'", ""))); err != nil {
+		return 0, st, fmt.Errorf("import snapshot %s of %s: %w", snapshot, src.Name, err)
 	}
-	defer tx.Rollback(ctx)
-	tcol := store.QuoteIdent(o.Cfg.Tenancy.TenantColumn)
-	var out []chunk
-	order := append(fact(o.Cfg), dims(o.Cfg)...)
-	for _, name := range order {
-		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT DISTINCT %s FROM %s ORDER BY 1", tcol, store.QuoteIdent(name)))
-		if err != nil {
-			return nil, fmt.Errorf("list tenants of %s: %w", name, err)
-		}
-		for rows.Next() {
-			var t int32
-			if err := rows.Scan(&t); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			out = append(out, chunk{table: name, tenant: t})
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
+	if err := seedDictionary(ctx, snap, src, o); err != nil {
+		return 0, st, err
 	}
-	return out, nil
-}
 
-func fact(cfg *config.Config) []string {
-	var out []string
-	for _, s := range cfg.FactSources() {
-		out = append(out, s.Name)
-	}
-	return out
-}
-
-func dims(cfg *config.Config) []string {
-	var out []string
-	for _, s := range cfg.Sources.Values() {
-		if s.Time == "" {
-			out = append(out, s.Name)
-		}
-	}
-	return out
-}
-
-func worker(ctx context.Context, o Options, work <-chan chunk, rows, done *atomic.Int64, total int64) error {
-	main, err := cdc.ConnectPlain(ctx, o.MainDSN, "cuboid-backfill")
+	tx, err := o.Store.W.Begin(ctx)
 	if err != nil {
-		return err
-	}
-	defer main.Close(context.Background())
-	tx, err := snapshotTx(ctx, main, o.Snapshot)
-	if err != nil {
-		return err
+		return 0, st, err
 	}
 	defer tx.Rollback(context.Background())
-	agg, err := o.Store.W.Acquire(ctx)
-	if err != nil {
-		return err
-	}
-	defer agg.Release()
-	tcol := store.QuoteIdent(o.Cfg.Tenancy.TenantColumn)
-	for c := range work {
+	start := time.Now()
+	tcol := o.Cfg.Tenancy.TenantColumn
+	for _, t := range src.Tables {
+		del, args := fmt.Sprintf("DELETE FROM %s", store.Names{}.Mirror(t.Name)), []any{}
+		if src.Tenant != 0 {
+			del, args = del+" WHERE "+store.QuoteIdent(tcol)+" = $1", []any{src.Tenant}
+		}
+		if _, err := tx.Exec(ctx, del, args...); err != nil {
+			return 0, st, fmt.Errorf("clear %s of %s: %w", t.Name, src.Name, err)
+		}
+		if t.Time != "" {
+			del, args := fmt.Sprintf("DELETE FROM %s", store.Names{}.Cells(t.Name)), []any{}
+			if src.Tenant != 0 {
+				del, args = del+" WHERE tenant_id = $1", []any{src.Tenant}
+			}
+			if _, err := tx.Exec(ctx, del, args...); err != nil {
+				return 0, st, fmt.Errorf("clear the rollups of %s for %s: %w", t.Name, src.Name, err)
+			}
+		}
 		if o.Throttle != nil {
 			o.Throttle(ctx)
 		}
-		spec := o.Specs[c.table]
-		var cols []string
-		for _, n := range spec.ColumnNames() {
-			cols = append(cols, store.QuoteIdent(n))
-		}
-		list := strings.Join(cols, ", ")
-		pr, pw := io.Pipe()
-		copyErr := make(chan error, 1)
-		go func() {
-			_, err := tx.Conn().PgConn().CopyTo(ctx, pw, fmt.Sprintf("COPY (SELECT %s FROM %s WHERE %s = %d) TO STDOUT",
-				list, store.QuoteIdent(c.table), tcol, c.tenant))
-			pw.CloseWithError(err)
-			copyErr <- err
-		}()
-		tag, err := agg.Conn().PgConn().CopyFrom(ctx, pr, fmt.Sprintf("COPY %s (%s) FROM STDIN", o.Names.Mirror(c.table), list))
-		pr.CloseWithError(err)
-		if cerr := <-copyErr; cerr != nil {
-			return fmt.Errorf("copy %s for store %d from the main database: %w", c.table, c.tenant, cerr)
-		}
+		n, err := copyTable(ctx, snap, tx, src, t, o)
 		if err != nil {
-			return fmt.Errorf("copy %s for store %d into the mirror: %w", c.table, c.tenant, err)
+			return 0, st, err
 		}
-		rows.Add(tag.RowsAffected())
-		n := done.Add(1)
-		if o.Progress != nil {
-			o.Progress("copy", n, total)
-		}
+		st.Rows += n
 	}
-	return tx.Commit(ctx)
-}
+	st.CopyTime = time.Since(start)
 
-// BuildAll seeds the dictionary and builds the given rollups from the mirror
-// for tenants (nil = all), in parallel, then refreshes planner statistics.
-func BuildAll(ctx context.Context, st *store.Store, cfg *config.Config, loc *time.Location, now time.Time, n store.Names, tenants []int32, rollups []*config.Rollup, progress func(string, int64, int64)) error {
-	for _, sql := range store.SeedDictionary(cfg, n) {
-		if _, err := st.W.Exec(ctx, sql); err != nil {
-			return fmt.Errorf("seed dictionary: %w", err)
-		}
+	start = time.Now()
+	var tenants []int32
+	if src.Tenant != 0 {
+		tenants = []int32{src.Tenant}
 	}
-	var done atomic.Int64
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(2) // keep aggregate-store capacity for queries answering during a rebuild
-	for _, r := range rollups {
-		g.Go(func() error {
-			for _, s := range store.BuildRollup(cfg, r, loc, now, n, tenants) {
-				if _, err := st.W.Exec(gctx, s.SQL, s.Args...); err != nil {
-					return fmt.Errorf("build rollup %s: %w", r.Name, err)
+	for _, t := range src.Tables {
+		for _, r := range o.Cfg.RollupsFor(t.Name) {
+			for _, s := range store.BuildRollup(o.Cfg, r, o.Loc, o.Now(), store.Names{}, tenants) {
+				if _, err := tx.Exec(ctx, s.SQL, s.Args...); err != nil {
+					return 0, st, fmt.Errorf("build rollup %s for %s: %w", r.Name, src.Name, err)
 				}
 			}
-			if progress != nil {
-				progress("build", done.Add(1), int64(len(rollups)))
+		}
+	}
+	st.BuildTime = time.Since(start)
+
+	var tenant any
+	if src.Tenant != 0 {
+		tenant = src.Tenant
+		if _, err := tx.Exec(ctx, `INSERT INTO data_versions (tenant_id, version, changed_at) VALUES ($1, 1, now())
+			ON CONFLICT (tenant_id) DO UPDATE SET version = data_versions.version + 1, changed_at = now()`, src.Tenant); err != nil {
+			return 0, st, err
+		}
+	}
+	// The snapshot is complete as of now: that is the data's age until the
+	// stream's first heartbeat arrives.
+	if _, err := tx.Exec(ctx, `INSERT INTO cdc_sources (source, tenant_id, slot, applied_lsn, applied_commit_time, heartbeat_time, backfilled_at)
+		VALUES ($1, $2, $3, $4::pg_lsn, now(), now(), now())
+		ON CONFLICT (source) DO UPDATE SET tenant_id = excluded.tenant_id, slot = excluded.slot, applied_lsn = excluded.applied_lsn,
+			applied_commit_time = excluded.applied_commit_time, heartbeat_time = excluded.heartbeat_time, backfilled_at = excluded.backfilled_at`,
+		src.Name, tenant, src.Slot, consistent.String()); err != nil {
+		return 0, st, fmt.Errorf("record the position of %s: %w", src.Name, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, st, fmt.Errorf("commit the load of %s: %w", src.Name, err)
+	}
+	ok = true
+	snap.Commit(ctx)
+	return consistent, st, nil
+}
+
+// copyTable streams one table from the source's snapshot into the mirror, in
+// the load's transaction. The mirror forces row-level security, under which
+// Postgres refuses COPY FROM, so rows land in a temporary table first. A
+// store's rows are attributed to that store: its database decides whose
+// they are, exactly as the stream does.
+func copyTable(ctx context.Context, snap pgx.Tx, tx pgx.Tx, src Source, t *config.Source, o Options) (int64, error) {
+	spec := o.Specs[t.Name]
+	if spec == nil {
+		return 0, fmt.Errorf("table %s: not found in the catalog", t.Name)
+	}
+	tcol := o.Cfg.Tenancy.TenantColumn
+	var cols, sel []string
+	for _, n := range spec.ColumnNames() {
+		cols = append(cols, store.QuoteIdent(n))
+		if n == tcol && src.Tenant != 0 {
+			sel = append(sel, fmt.Sprintf("%d", src.Tenant))
+			continue
+		}
+		sel = append(sel, store.QuoteIdent(n))
+	}
+	list := strings.Join(cols, ", ")
+	tmp := store.QuoteIdent("load_" + t.Name)
+	if _, err := tx.Exec(ctx, fmt.Sprintf("CREATE TEMP TABLE %s (LIKE %s) ON COMMIT DROP", tmp, store.Names{}.Mirror(t.Name))); err != nil {
+		return 0, err
+	}
+	pr, pw := io.Pipe()
+	copyErr := make(chan error, 1)
+	go func() {
+		_, err := snap.Conn().PgConn().CopyTo(ctx, pw, fmt.Sprintf("COPY (SELECT %s FROM %s) TO STDOUT", strings.Join(sel, ", "), store.QuoteIdent(t.Name)))
+		pw.CloseWithError(err)
+		copyErr <- err
+	}()
+	tag, err := tx.Conn().PgConn().CopyFrom(ctx, pr, fmt.Sprintf("COPY %s (%s) FROM STDIN", tmp, list))
+	pr.CloseWithError(err)
+	if cerr := <-copyErr; cerr != nil {
+		return 0, fmt.Errorf("copy %s from %s: %w", t.Name, src.Name, cerr)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("copy %s of %s into the mirror: %w", t.Name, src.Name, err)
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf("INSERT INTO %s (%s) SELECT %s FROM %s", store.Names{}.Mirror(t.Name), list, list, tmp)); err != nil {
+		return 0, fmt.Errorf("load %s of %s into the mirror: %w", t.Name, src.Name, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// seedDictionary inserts the source's text dimension values into the shared
+// dictionary in a short transaction of its own, in a fixed order, so stores
+// loading at the same time never block or deadlock on the same values.
+func seedDictionary(ctx context.Context, snap pgx.Tx, src Source, o Options) error {
+	var dims, vals []string
+	for _, ds := range store.DictionarySources(o.Cfg, src.Tables) {
+		rows, err := snap.Query(ctx, ds.SQL)
+		if err != nil {
+			return fmt.Errorf("list %s values in %s: %w", ds.Dim, src.Name, err)
+		}
+		for rows.Next() {
+			var v string
+			if err := rows.Scan(&v); err != nil {
+				rows.Close()
+				return err
 			}
-			return nil
-		})
+			dims, vals = append(dims, ds.Dim), append(vals, v)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
 	}
-	if err := g.Wait(); err != nil {
-		return err
+	if len(dims) == 0 {
+		return nil
 	}
+	idx := make([]int, len(dims))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.Slice(idx, func(a, b int) bool {
+		if dims[idx[a]] != dims[idx[b]] {
+			return dims[idx[a]] < dims[idx[b]]
+		}
+		return vals[idx[a]] < vals[idx[b]]
+	})
+	sd, sv := make([]string, len(idx)), make([]string, len(idx))
+	for i, j := range idx {
+		sd[i], sv[i] = dims[j], vals[j]
+	}
+	_, err := o.Store.W.Exec(ctx, `INSERT INTO dict (dim, value) SELECT * FROM unnest($1::text[], $2::text[])
+		ON CONFLICT (dim, value) DO NOTHING`, sd, sv)
+	if err != nil {
+		return fmt.Errorf("seed the dictionary from %s: %w", src.Name, err)
+	}
+	return nil
+}
+
+func dropSlot(src Source, log *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	e := cdc.NewEmitter(src.DSN)
+	defer e.Close()
+	if err := e.DropSlot(ctx, src.Slot); err != nil && log != nil {
+		log.Warn("drop the slot of a failed load", "slot", src.Slot, "err", err)
+	}
+}
+
+// Analyze refreshes the planner's statistics of every mirror and cell table,
+// after a batch of loads.
+func Analyze(ctx context.Context, st *store.Store, cfg *config.Config) error {
 	var tables []string
 	for _, name := range cfg.Sources.Keys() {
-		tables = append(tables, n.Mirror(name))
+		tables = append(tables, store.Names{}.Mirror(name))
 	}
 	for _, src := range cfg.FactSources() {
-		tables = append(tables, n.Cells(src.Name))
+		tables = append(tables, store.Names{}.Cells(src.Name))
 	}
 	_, err := st.W.Exec(ctx, "ANALYZE "+strings.Join(tables, ", "))
 	return err

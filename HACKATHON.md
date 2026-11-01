@@ -20,7 +20,7 @@
 Dashboards need counts, trends, top-N lists and breakdowns per store. Running those on the main database means "one big store's report makes the app slow for all stores". Caching alone trades that for the failure behind INC-02, where a cache bug showed users other users' data.
 
 ## Our answer
-Cuboid reads the main database's change stream and keeps exact, pre-computed rollups in a separate Postgres. Dashboards read only from there.
+Each store's data sits in its own database, as the PRD describes. Cuboid reads every store's database through its own change stream and keeps exact, pre-computed rollups in a separate Postgres. Dashboards, for a store or a whole company, read only from there. A failure in one store's database reloads only that store ([ADR-012](docs/adr/ADR-012-database-per-store.md)).
 
 <p align="center"><img src="docs/img/before-after.svg" alt="Before: dashboards and the store app compete on the main database. After: dashboards read an aggregate store fed by the change stream." width="100%"></p>
 

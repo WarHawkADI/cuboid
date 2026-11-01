@@ -3,11 +3,14 @@
 ## Source
 The organisers' data script has not been supplied, so `provided/` is empty and Cuboid uses its fallback generator, `cmd/seed`. It mirrors the PRD's entities. Everything specific to the schema lives in `config/metrics.yaml` and `migrations/main/001_schema.sql`; the engine reads table and column names from config and column types from the main database's catalog. Moving to the organisers' schema has not been done, so this portability is a design claim until it is.
 
+## Databases
+Each store's data sits in its own database on the main server (ADR-012). `shop`, the platform's database, holds `companies`, `tenants` (the registry of stores) and the bulk-load flag. `store_<id>` holds that store's `orders`, `products`, `customers` and `soc_alerts`; it is created from `store_template` and every table is pinned to the store with `CHECK (tenant_id = <id>)`. Every table still carries `tenant_id`, so a row names its store wherever it is copied.
+
 ## Tables
 | Table | Holds | Notes |
 |---|---|---|
-| `companies` | company id, name | Not mirrored |
-| `tenants` | store id, company id, name | A tenant is a store |
+| `companies` | company id, name | Platform database. Not mirrored |
+| `tenants` | store id, company id, name | Platform database. A tenant is a store; its database is `store_<id>` |
 | `orders` | one product per order, quantity, amount in paise, status, payment method, channel, timestamps | The fact table. Single-product orders are a deliberate simplification |
 | `products` | name, category, price | Category lives here, so a breakdown by category uses a join dimension |
 | `customers` | name, email and phone (PII, never mirrored), city, region | |

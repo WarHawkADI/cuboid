@@ -9,134 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"cuboid/internal/backfill"
-	"cuboid/internal/cdc"
 	"cuboid/internal/config"
 	"cuboid/internal/engine"
 	"cuboid/internal/store"
 )
-
-// rebuildFromMain rebuilds every number from scratch (bonus B-2): a new slot
-// with an exported snapshot, a canary-guarded backfill into shadow tables,
-// then one transaction swaps the shadows in and moves the stream to the new
-// slot. Queries keep answering from the live tables the whole time, labelled
-// with their honest freshness.
-func (c *Core) rebuildFromMain(ctx context.Context, reason string) error {
-	c.opMu.Lock()
-	defer c.opMu.Unlock()
-	c.setState("rebuilding from main")
-	c.Rebuild.Start("main", "all stores", reason)
-	c.Rec.Annotate("Rebuild from scratch started")
-	cfg := c.Config()
-	var oldSlot string
-	if err := c.Store.W.QueryRow(ctx, "SELECT coalesce(slot, '') FROM cdc_state").Scan(&oldSlot); err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	newSlot := "cuboid_a"
-	if oldSlot == "cuboid_a" {
-		newSlot = "cuboid_b"
-	}
-	if err := c.Emitter.DropSlot(ctx, newSlot); err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	if err := c.Store.DropShadows(ctx, cfg); err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	var ddl []string
-	for _, name := range cfg.Sources.Keys() {
-		ddl = append(ddl, store.MirrorDDL(c.Specs[name], cfg.Tenancy.TenantColumn, "_shadow")...)
-	}
-	for _, src := range cfg.FactSources() {
-		ddl = append(ddl, store.CellDDL(src, "_shadow")...)
-	}
-	for _, s := range ddl {
-		if _, err := c.Store.W.Exec(ctx, s); err != nil {
-			return c.Rebuild.Fail(fmt.Errorf("%s: %w", s, err))
-		}
-	}
-	conn, err := cdc.ConnectReplication(ctx, c.Opt.MainCDCDSN)
-	if err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	s := &cdc.Stream{Conn: conn, Slot: newSlot, Publication: c.Opt.Publication, Log: c.Log}
-	consistent, snapshot, err := s.CreateSlot(ctx, false)
-	if err != nil {
-		conn.Close(context.Background())
-		return c.Rebuild.Fail(err)
-	}
-	stats, err := backfill.Run(ctx, backfill.Options{
-		MainDSN: c.Opt.MainCDCDSN, Snapshot: snapshot, Store: c.Store, Cfg: cfg, Specs: c.Specs,
-		Names: store.Shadow, Loc: c.Loc, Now: time.Now, Workers: 4, Throttle: c.canaryThrottle, Log: c.Log,
-		Progress: c.Rebuild.Update,
-	})
-	conn.Close(context.Background()) // the exported snapshot is no longer needed
-	if err != nil {
-		c.Emitter.DropSlot(context.Background(), newSlot)
-		return c.Rebuild.Fail(err)
-	}
-	tx, err := c.Store.W.Begin(ctx)
-	if err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	defer tx.Rollback(context.Background())
-	if err := store.SwapIn(ctx, tx, liveTables(cfg), "_shadow"); err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE cdc_state SET slot = $1, applied_lsn = $2::pg_lsn, backfilled_at = now()`, newSlot, consistent.String()); err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	names := cfg.Rollups.Keys()
-	if err := store.SetReady(ctx, tx, names, true); err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	for _, n := range names {
-		c.ready.Store(n, true)
-	}
-	if oldSlot != "" && oldSlot != newSlot {
-		if err := c.Emitter.DropSlot(ctx, oldSlot); err != nil {
-			c.Log.Warn("drop previous slot", "slot", oldSlot, "err", err)
-		}
-	}
-	c.engine.ForgetDimensions()
-	if err := c.Dict.Load(ctx, c.Store.W); err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	if err := c.loadMembership(ctx); err != nil {
-		return c.Rebuild.Fail(err)
-	}
-	if c.Opt.DemoMode {
-		c.EnsureDemoKeys(ctx)
-	}
-	c.Hist.Invalidate(c.Members.AllTenants())
-	go c.Svc.Stats.Refresh(context.Background(), c.Store, cfg)
-	msg := fmt.Sprintf("Rebuilt from scratch: %d rows copied in %s, rollups built in %s", stats.Rows, stats.CopyTime.Round(time.Second), stats.BuildTime.Round(time.Second))
-	c.Rebuild.Finish(msg)
-	c.Rec.Annotate("Rebuilt from scratch")
-	c.Log.Info(msg)
-	return nil
-}
-
-func liveTables(cfg *config.Config) []string {
-	var out []string
-	for _, name := range cfg.Sources.Keys() {
-		out = append(out, config.MirrorTable(name))
-	}
-	for _, src := range cfg.FactSources() {
-		out = append(out, config.CellTable(src.Name))
-	}
-	return out
-}
-
-// RebuildFromMain stops the stream and rebuilds from scratch.
-func (c *Core) RebuildFromMain(reason string) {
-	c.requestMainRebuild(reason)
-	if stop := c.streamStop.Load(); stop != nil {
-		(*stop)()
-	}
-}
 
 // canaryThrottle blocks while the store app's p95 is more than 5% above its
 // baseline, backing off exponentially, so a backfill never slows the app.
@@ -180,7 +56,7 @@ func (c *Core) RebuildFromMirror(ctx context.Context, tenants []int32, rollups [
 	c.Rec.Annotate("Rebuild from the mirror started")
 
 	// 1. Pause at a flush boundary L and take a snapshot of AGG there.
-	if _, err := p.Pause(ctx, beforeResume); err != nil {
+	if err := p.Pause(ctx, beforeResume); err != nil {
 		return c.Rebuild.Fail(err)
 	}
 	resumed := false
@@ -280,7 +156,7 @@ func (c *Core) RebuildFromMirror(ctx context.Context, tenants []int32, rollups [
 		}
 	}
 	// 5. Pause briefly: apply the last deltas and swap in one transaction.
-	if _, err := p.Pause(ctx, nil); err != nil {
+	if err := p.Pause(ctx, nil); err != nil {
 		p.TakeDeltaLog(false)
 		return c.Rebuild.Fail(err)
 	}

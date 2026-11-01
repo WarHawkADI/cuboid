@@ -16,12 +16,8 @@ import (
 // tables or a rebuild's shadow copies. A rebuild from the mirror reads the
 // live mirror and writes shadow cells; a rebuild from main uses shadows of both.
 type Names struct {
-	MirrorSuffix string // "" or "_shadow"
-	CellSuffix   string // "" or "_shadow"
+	CellSuffix string // "" or "_shadow", a rebuild's shadow copy
 }
-
-// Shadow names shadow copies of every table.
-var Shadow = Names{MirrorSuffix: "_shadow", CellSuffix: "_shadow"}
 
 // Cells is the cell table of a fact source.
 func (n Names) Cells(source string) string {
@@ -30,7 +26,7 @@ func (n Names) Cells(source string) string {
 
 // Mirror is the mirror of a source table.
 func (n Names) Mirror(source string) string {
-	return QuoteIdent(config.MirrorTable(source) + n.MirrorSuffix)
+	return QuoteIdent(config.MirrorTable(source))
 }
 
 // joins collects the LEFT JOINs a set of dimension expressions needs.
@@ -173,6 +169,37 @@ func SeedDictionary(cfg *config.Config, n Names) []string {
 			out = append(out, fmt.Sprintf(`INSERT INTO dict (dim, value)
 				SELECT DISTINCT %s, (%s)::text FROM %s WHERE %s IS NOT NULL
 				ON CONFLICT (dim, value) DO NOTHING`, quoteLiteral(d.Name), col, table, col))
+		}
+	}
+	return out
+}
+
+// DictionarySource is one query, run in a source database, that lists the
+// values of one text dimension found there.
+type DictionarySource struct {
+	Dim string
+	SQL string
+}
+
+// DictionarySources lists every text dimension value of the given source
+// tables as their own database holds them. A store's load seeds the shared
+// dictionary from these in a short transaction of its own, before its long
+// one: stores loading in parallel then never wait on each other's ids.
+func DictionarySources(cfg *config.Config, sources []*config.Source) []DictionarySource {
+	var out []DictionarySource
+	for _, src := range sources {
+		if src.Time == "" {
+			continue
+		}
+		for _, d := range src.Dimensions.Values() {
+			if d.IsKey() {
+				continue
+			}
+			table, col := QuoteIdent(src.Name), QuoteIdent(d.Column)
+			if d.Join != nil {
+				table, col = QuoteIdent(d.Join.Table), QuoteIdent(d.Join.Column)
+			}
+			out = append(out, DictionarySource{Dim: d.Name, SQL: fmt.Sprintf("SELECT DISTINCT (%s)::text FROM %s WHERE %s IS NOT NULL", col, table, col)})
 		}
 	}
 	return out

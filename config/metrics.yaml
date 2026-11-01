@@ -7,6 +7,9 @@ timezone: from_main_db            # read SHOW TimeZone on the main database at s
 tenancy:
   tenant_column: tenant_id         # every published table carries the store id
   company: {table: tenants, key: tenant_id, column: company_id, name_column: name}
+  # Each store's data sits in its own database (ADR-012). The main database
+  # holds only the registry above; every other source is in each store's.
+  databases: {store: "store_{tenant}", template: store_template}
 
 sources:
   orders:

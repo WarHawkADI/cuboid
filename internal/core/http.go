@@ -188,12 +188,21 @@ func (c *Core) adminRebuild(w http.ResponseWriter, r *http.Request) {
 	}
 	switch source {
 	case "main":
+		// Each store reloads from its own database, in its own transaction.
+		var tenants []int32
 		if scope != "all" {
-			query.WriteProblem(w, &query.Problem{Status: 400, Type: "invalid_parameter", Title: "Invalid scope", Detail: "A rebuild from the main database rebuilds every store; use source=mirror for one store or rollup."})
+			id, err := strconv.Atoi(strings.TrimPrefix(scope, "tenant:"))
+			if !strings.HasPrefix(scope, "tenant:") || err != nil {
+				query.WriteProblem(w, &query.Problem{Status: 400, Type: "invalid_parameter", Title: "Invalid scope", Detail: "use scope=all or tenant:<id>"})
+				return
+			}
+			tenants = []int32{int32(id)}
+		}
+		if err := c.ReloadStores(tenants, "requested by an operator"); err != nil {
+			query.WriteProblem(w, &query.Problem{Status: 409, Type: "not_ready", Title: "Cannot reload", Detail: err.Error()})
 			return
 		}
-		c.RebuildFromMain("requested by an operator")
-		writeJSON(w, 202, map[string]string{"status": "started", "source": "main"})
+		writeJSON(w, 202, map[string]string{"status": "started", "source": "main", "scope": scope})
 	case "mirror":
 		var tenants []int32
 		var label = "requested by an operator"
@@ -299,10 +308,14 @@ func (c *Core) adminChaos(w http.ResponseWriter, r *http.Request) {
 			p.Kill() // SIGKILL: no flush, no cleanup; the supervisor restarts us
 		}()
 	case "drop_replication":
-		c.Rec.Annotate("Replication connection dropped")
-		if stop := c.streamStop.Load(); stop != nil {
-			(*stop)()
+		c.Rec.Annotate("Replication connections dropped")
+		c.srcMu.Lock()
+		for _, s := range c.sources {
+			if stop := s.stop.Load(); stop != nil {
+				(*stop)() // the source reconnects and resumes from its committed position
+			}
 		}
+		c.srcMu.Unlock()
 		writeJSON(w, 202, map[string]string{"status": "dropped"})
 	default:
 		query.WriteProblem(w, &query.Problem{Status: 400, Type: "invalid_parameter", Title: "Unknown chaos action", Detail: "use kill or drop_replication"})
@@ -447,16 +460,21 @@ func (c *Core) monitorState(w http.ResponseWriter, r *http.Request) {
 	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 	points, notes := c.Rec.Snapshot(since)
 	points, notes = nonNil(points), nonNil(notes)
-	f := c.freshness()
+	f := c.freshness(nil)
 	var lag int64 = -1
 	if as := f.AsOf(); !as.IsZero() {
 		lag = time.Since(as).Milliseconds()
 	}
 	p := c.Pipeline()
-	pipe := map[string]any{}
-	if p != nil {
-		pipe = map[string]any{"applied_lsn": p.Applied().String(), "flushes": p.Flushes.Load(), "transactions": p.TxnsApplied.Load(), "last_flush_ms": p.LastFlushMS.Load()}
+	sources := c.Sources()
+	streaming := 0
+	for _, s := range sources {
+		if s.State == "streaming" {
+			streaming++
+		}
 	}
+	pipe := map[string]any{"flushes": p.Flushes.Load(), "transactions": p.TxnsApplied.Load(), "last_flush_ms": p.LastFlushMS.Load(),
+		"sources": len(sources), "streaming": streaming, "applied_lsn": f.LSN}
 	cfg := c.Config()
 	var rollups []map[string]any
 	for _, ro := range cfg.Rollups.Values() {
@@ -475,6 +493,7 @@ func (c *Core) monitorState(w http.ResponseWriter, r *http.Request) {
 		"freshness":  map[string]any{"lag_ms": lag, "lsn": f.LSN, "as_of": f.AsOf()},
 		"slot":       c.Rec.Slot(),
 		"pipeline":   pipe,
+		"sources":    sources,
 		"alarms":     nonNil(c.Alarms.List()),
 		"latency":    nonNil(c.Svc.Latency.Snapshot()),
 		"cache":      map[string]any{"hits": hits, "misses": misses, "coalesced": c.Svc.Coalesced.Load(), "stale": c.Svc.StaleServed.Load()},
@@ -520,7 +539,7 @@ func last[T any](xs []T, n int) []T {
 
 func (c *Core) prometheus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	f := c.freshness()
+	f := c.freshness(nil)
 	lag := 0.0
 	if as := f.AsOf(); !as.IsZero() {
 		lag = time.Since(as).Seconds()

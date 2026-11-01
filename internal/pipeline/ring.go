@@ -56,16 +56,3 @@ func (r *Ring) Between(lo, hi uint64, since time.Time) ([]*engine.Txn, bool) {
 	}
 	return out, covered
 }
-
-// Recent returns transactions committed within the last d.
-func (r *Ring) Recent(d time.Duration) []*engine.Txn {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var out []*engine.Txn
-	for _, e := range r.txns {
-		if time.Since(e.at) <= d {
-			out = append(out, e.txn)
-		}
-	}
-	return out
-}

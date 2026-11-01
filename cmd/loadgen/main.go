@@ -62,7 +62,6 @@ type gen struct {
 	errs    atomic.Int64
 	bad     map[string]int64 // failures by status and query, to say what failed
 	reqs    atomic.Int64
-	gen     atomic.Int64
 }
 
 type sample struct {

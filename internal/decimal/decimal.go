@@ -79,28 +79,3 @@ func Parse(s string, scale int) (int64, error) {
 	}
 	return v, nil
 }
-
-// IndianGroup formats an integer with Indian digit grouping (12,34,567).
-func IndianGroup(v int64) string {
-	neg := v < 0
-	if neg {
-		v = -v
-	}
-	s := strconv.FormatInt(v, 10)
-	if len(s) > 3 {
-		head, tail := s[:len(s)-3], s[len(s)-3:]
-		var parts []string
-		for len(head) > 2 {
-			parts = append([]string{head[len(head)-2:]}, parts...)
-			head = head[:len(head)-2]
-		}
-		if head != "" {
-			parts = append([]string{head}, parts...)
-		}
-		s = strings.Join(parts, ",") + "," + tail
-	}
-	if neg {
-		s = "-" + s
-	}
-	return s
-}

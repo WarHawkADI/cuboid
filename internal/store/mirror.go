@@ -113,10 +113,9 @@ func Checks(ctx context.Context, q interface {
 	return out, rows.Err()
 }
 
-// MirrorDDL creates or extends a mirror table, with RLS. suffix is "" for
-// the live table or "_shadow" for a rebuild's shadow copy.
-func MirrorDDL(t *Table, tenantCol, suffix string) []string {
-	name := QuoteIdent(t.Name() + suffix)
+// MirrorDDL creates or extends a mirror table, with RLS.
+func MirrorDDL(t *Table, tenantCol string) []string {
+	name := QuoteIdent(t.Name())
 	var cols []string
 	for _, c := range t.Columns {
 		cols = append(cols, fmt.Sprintf("%s %s", QuoteIdent(c.Name), c.Type))
@@ -130,9 +129,9 @@ func MirrorDDL(t *Table, tenantCol, suffix string) []string {
 	}
 	if t.Source.Time != "" {
 		stmts = append(stmts, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s, %s)",
-			QuoteIdent(t.Name()+suffix+"_time"), name, QuoteIdent(tenantCol), QuoteIdent(t.Source.Time)))
+			QuoteIdent(t.Name()+"_time"), name, QuoteIdent(tenantCol), QuoteIdent(t.Source.Time)))
 	}
-	return withRLS(stmts, t.Name(), suffix)
+	return withRLS(stmts, t.Name(), "")
 }
 
 // CellDDL creates or extends a fact source's rollup cell table.
@@ -202,7 +201,7 @@ func (s *Store) EnsureTables(ctx context.Context, cfg *config.Config, specs map[
 		if t == nil {
 			return fmt.Errorf("source %s: table not found in the main database", name)
 		}
-		for _, stmt := range MirrorDDL(t, cfg.Tenancy.TenantColumn, "") {
+		for _, stmt := range MirrorDDL(t, cfg.Tenancy.TenantColumn) {
 			if _, err := tx.Exec(ctx, stmt); err != nil {
 				return fmt.Errorf("%s: %w", stmt, err)
 			}
@@ -332,13 +331,9 @@ func SwapIn(ctx context.Context, tx pgx.Tx, live []string, suffix string) error 
 	return nil
 }
 
-// DropShadows removes leftover shadow tables from an interrupted rebuild.
+// DropShadows removes shadow cell tables left by an interrupted rebuild from
+// the mirror.
 func (s *Store) DropShadows(ctx context.Context, cfg *config.Config) error {
-	for _, name := range cfg.Sources.Keys() {
-		if _, err := s.W.Exec(ctx, "DROP TABLE IF EXISTS "+QuoteIdent(config.MirrorTable(name)+"_shadow")); err != nil {
-			return err
-		}
-	}
 	for _, src := range cfg.FactSources() {
 		if _, err := s.W.Exec(ctx, "DROP TABLE IF EXISTS "+QuoteIdent(config.CellTable(src.Name)+"_shadow")); err != nil {
 			return err

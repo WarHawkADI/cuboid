@@ -20,8 +20,9 @@ import (
 	"cuboid/internal/store"
 )
 
-// Position is how far the stream has been applied.
+// Position is how far one source database's stream has been applied.
 type Position struct {
+	Source     string // the source database
 	LSN        string // pg_lsn text, e.g. 0/3A1F2C8
 	CommitTime time.Time
 	Heartbeat  time.Time
@@ -53,8 +54,9 @@ type Flusher struct {
 	Building func(name string) bool
 }
 
-// Flush writes d at position pos. cfg is the configuration d was built with.
-func (f *Flusher) Flush(ctx context.Context, cfg *config.Config, d *engine.Delta, pos Position) (*Result, error) {
+// Flush writes d with the positions it brings each source to, in one
+// transaction. cfg is the configuration d was built with.
+func (f *Flusher) Flush(ctx context.Context, cfg *config.Config, d *engine.Delta, positions []Position) (*Result, error) {
 	start := time.Now()
 	tx, err := f.Store.W.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -130,11 +132,11 @@ func (f *Flusher) Flush(ctx context.Context, cfg *config.Config, d *engine.Delta
 		}
 	}
 
-	if pos.LSN != "" {
-		if _, err := tx.Exec(ctx, `UPDATE cdc_state SET applied_lsn = $1::pg_lsn,
-			applied_commit_time = coalesce($2, applied_commit_time), heartbeat_time = coalesce($3, heartbeat_time),
-			flushes = flushes + 1`, pos.LSN, nullTime(pos.CommitTime), nullTime(pos.Heartbeat)); err != nil {
-			return nil, fmt.Errorf("record applied position: %w", err)
+	for _, pos := range positions {
+		if _, err := tx.Exec(ctx, `UPDATE cdc_sources SET applied_lsn = $2::pg_lsn,
+			applied_commit_time = coalesce($3, applied_commit_time), heartbeat_time = coalesce($4, heartbeat_time),
+			flushes = flushes + 1 WHERE source = $1`, pos.Source, pos.LSN, nullTime(pos.CommitTime), nullTime(pos.Heartbeat)); err != nil {
+			return nil, fmt.Errorf("record applied position of %s: %w", pos.Source, err)
 		}
 	}
 	if len(d.Touched) > 0 {
@@ -170,7 +172,7 @@ func (f *Flusher) Flush(ctx context.Context, cfg *config.Config, d *engine.Delta
 		}
 	}
 	if f.Notify != "" && len(d.Touched) > 0 {
-		if _, err := tx.Exec(ctx, "SELECT pg_notify($1, $2)", f.Notify, pos.LSN); err != nil {
+		if _, err := tx.Exec(ctx, "SELECT pg_notify($1, $2)", f.Notify, fmt.Sprint(len(positions))); err != nil {
 			return nil, err
 		}
 	}

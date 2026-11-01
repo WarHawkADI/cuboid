@@ -6,7 +6,7 @@ set -euo pipefail
 PGBIN="${PGBIN:-$HOME/sdk/pgsql16/bin}"
 DATA="${DEVDB_DATA:-$HOME/sdk/pgdata}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MAIN_OPTS="-c port=5433 -c wal_level=logical -c max_replication_slots=10 -c max_wal_senders=10 -c max_slot_wal_keep_size=4GB -c shared_preload_libraries=pg_stat_statements -c track_io_timing=on -c timezone=Asia/Kolkata -c shared_buffers=1GB -c effective_cache_size=3GB -c work_mem=32MB -c maintenance_work_mem=512MB -c max_connections=300 -c logical_decoding_work_mem=256MB -c max_wal_size=4GB"
+MAIN_OPTS="-c port=5433 -c wal_level=logical -c max_replication_slots=250 -c max_wal_senders=250 -c max_slot_wal_keep_size=4GB -c shared_preload_libraries=pg_stat_statements -c track_io_timing=on -c timezone=Asia/Kolkata -c shared_buffers=1GB -c effective_cache_size=3GB -c work_mem=32MB -c maintenance_work_mem=512MB -c max_connections=800 -c logical_decoding_work_mem=16MB -c max_wal_size=4GB"
 AGG_OPTS="-c port=5434 -c timezone=Asia/Kolkata -c shared_buffers=1GB -c effective_cache_size=3GB -c work_mem=64MB -c maintenance_work_mem=1GB -c max_connections=200 -c max_wal_size=1GB -c max_parallel_workers_per_gather=2"
 
 start() { "$PGBIN/pg_ctl" -D "$DATA/$1" -w -t 60 -l "$DATA/$1.log" -o "$2" start > "$DATA/$1.ctl.log" 2>&1; }  # the server must not inherit our stdout

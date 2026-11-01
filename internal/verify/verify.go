@@ -15,7 +15,6 @@ import (
 
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/time/rate"
 
 	"cuboid/internal/cdc"
@@ -27,17 +26,26 @@ import (
 	"cuboid/internal/store"
 )
 
-// Verifier compares Cuboid's answers with direct SQL on the main database.
+// Source is one source database a check reads: its fence goes into that
+// database's WAL and its direct query runs in a snapshot of it.
+type Source struct {
+	Name      string
+	Tenants   []int32 // the stores whose data it holds, of those checked
+	Emitter   *cdc.Emitter
+	VerifyDSN string // cuboid_verify on that database: SELECT only, statement_timeout 5s
+}
+
+// Verifier compares Cuboid's answers with direct SQL on the source databases.
 type Verifier struct {
-	Main     *pgxpool.Pool // cuboid_verify: SELECT only, statement_timeout 5s, two connections
-	Emitter  *cdc.Emitter
+	// Sources returns the source databases holding the given stores.
+	Sources  func(tenants []int32) ([]Source, error)
 	Pipeline func() *pipeline.Pipeline
 	Svc      *query.Service
 	Store    *store.Store
 	Loc      *time.Location
 	Limit    *rate.Limiter
-	// OnMismatch is told about every failed check: it is always a bug.
-	OnMismatch func(detail string)
+	// OnMismatch is told about every failed check and its stores: it is always a bug.
+	OnMismatch func(tenants []int32, detail string)
 	one        sync.Mutex // one direct query at a time
 
 	Checks   atomic.Int64
@@ -140,7 +148,25 @@ func token() string {
 	return hex.EncodeToString(b)
 }
 
-// fenced implements Section 10.2.
+// part is one source database's side of a check.
+type part struct {
+	src      Source
+	token    string
+	reached  <-chan FenceReached
+	fence    pglogrepl.LSN
+	snap     snapshot
+	direct   planner.Result
+	walAfter pglogrepl.LSN
+}
+
+// FenceReached is the pipeline's signal, aliased here for brevity.
+type FenceReached = pipeline.FenceReached
+
+// fenced implements Section 10.2, once per source database (ADR-012). Each
+// store's database gets its own fence and its own snapshot. Each stream holds
+// at its fence, so one aggregate-store snapshot taken while all are held
+// holds every store exactly as of its fence: a company's answer is checked
+// whole, against the sum of its stores' direct queries.
 func (v *Verifier) fenced(ctx context.Context, t query.Target, req *query.Request) (*Result, error) {
 	act := v.Svc.Active()
 	cfg := act.Cfg
@@ -152,87 +178,117 @@ func (v *Verifier) fenced(ctx context.Context, t query.Target, req *query.Reques
 	}
 	p := v.Pipeline()
 	if p == nil {
-		return nil, errors.New("Cuboid is rebuilding or reconnecting, so it cannot fence the stream right now. Try again in a moment.")
+		return nil, errors.New("Cuboid is starting, so it cannot fence the streams right now. Try again in a moment.")
+	}
+	sources, err := v.Sources(t.Tenants)
+	if err != nil {
+		return nil, err
 	}
 	began := time.Now()
-	tok := token()
-	reached := p.AwaitFence(tok)
-	defer p.CancelFence(tok)
-
-	// 1. The fence enters the WAL now, at P.
-	fence, err := v.Emitter.Emit(ctx, cdc.PrefixFence, tok)
-	if err != nil {
-		return nil, err
+	parts := make([]*part, len(sources))
+	for i, src := range sources {
+		pt := &part{src: src, token: token()}
+		pt.reached = p.AwaitFence(pt.token)
+		defer p.CancelFence(pt.token)
+		parts[i] = pt
 	}
 
-	// 3 (concurrently). When the stream reaches P, AGG holds exactly the
-	// transactions committed before P: evaluate Cuboid there.
-	type agg struct {
-		res planner.Result
-		ms  float64
-		err error
-	}
-	aggc := make(chan agg, 1)
-	go func() {
-		select {
-		case fr := <-reached:
-			if fr.Busy {
-				aggc <- agg{err: errRingGap}
-				return
-			}
-			start := time.Now()
-			r, err := v.Svc.EvalAt(ctx, t, req, plan, func() { close(fr.Release) })
-			aggc <- agg{res: r, ms: msSince(start), err: err}
-		case <-time.After(15 * time.Second):
-			aggc <- agg{err: errors.New("the stream did not reach the fence within 15 s")}
-		case <-ctx.Done():
-			aggc <- agg{err: ctx.Err()}
-		}
-	}()
-
-	// 2. The direct query in a REPEATABLE READ snapshot S on MAIN.
-	sql, args := DirectSQL(cfg, &q, v.Loc)
+	// 1 and 2, per source: the fence enters its WAL at P, then the direct
+	// query runs in a REPEATABLE READ snapshot S of that database.
 	start := time.Now()
-	snap, direct, walAfter, err := v.direct(ctx, sql, args, cfg.Sources.Get(q.Source))
+	var sql string
+	var args []any
+	for _, pt := range parts {
+		if pt.fence, err = pt.src.Emitter.Emit(ctx, cdc.PrefixFence, pt.token); err != nil {
+			return nil, err
+		}
+		qs := q
+		qs.Tenants = pt.src.Tenants
+		sql, args = DirectSQL(cfg, &qs, v.Loc)
+		if pt.snap, pt.direct, pt.walAfter, err = v.direct(ctx, pt.src, sql, args, cfg.Sources.Get(q.Source)); err != nil {
+			return nil, err
+		}
+	}
 	directMS := msSince(start)
+
+	// 3. Wait until every stream reaches its fence and holds there; then the
+	// aggregate store, flushed, holds each source exactly to its fence.
+	var releases []chan struct{}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			for _, r := range releases {
+				close(r)
+			}
+		}
+	}
+	defer release()
+	timeout := time.After(15 * time.Second)
+	for _, pt := range parts {
+		select {
+		case fr := <-pt.reached:
+			if fr.Busy {
+				return nil, errRingGap
+			}
+			releases = append(releases, fr.Release)
+		case <-timeout:
+			return nil, fmt.Errorf("the stream of %s did not reach its fence within 15 s", pt.src.Name)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if err := p.Flush(ctx); err != nil {
+		return nil, err
+	}
+	start = time.Now()
+	cub, err := v.Svc.EvalAt(ctx, t, req, plan, release)
 	if err != nil {
 		return nil, err
 	}
-	a := <-aggc
-	if a.err != nil {
-		return nil, a.err
-	}
+	cuboidMS := msSince(start)
 
-	// 4. Wait until every transaction visible in S has been streamed.
-	deadline := time.Now().Add(15 * time.Second)
-	for p.Applied() < walAfter {
-		if time.Now().After(deadline) {
-			return nil, errors.New("the stream did not catch up with the direct query's snapshot within 15 s")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	// 4. Per source, wait until every transaction visible in S has been
+	// streamed, then reconcile the transactions whose commit order differs
+	// from their visibility to S.
 	ring := p.Ring()
 	var rMinus, rPlus []*engine.Txn
-	// Transactions out of order with the fence commit around it, so a margin
-	// before this check began is enough.
-	recent, covered := ring.Between(0, uint64(walAfter), began.Add(-5*time.Second))
-	if !covered {
-		return nil, errRingGap
-	}
-	for _, txn := range recent {
-		visible := snap.visible(txn.Xid)
-		if txn.CommitLSN < uint64(fence) && !visible {
-			rMinus = append(rMinus, txn)
+	direct := planner.Result{}
+	for _, pt := range parts {
+		deadline := time.Now().Add(15 * time.Second)
+		for p.Applied(pt.src.Name) < pt.walAfter {
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("the stream of %s did not catch up with the direct query's snapshot within 15 s", pt.src.Name)
+			}
+			time.Sleep(50 * time.Millisecond)
 		}
-		// A commit at exactly the fence's LSN comes straight after it in the
-		// WAL (see pipeline.messagePosition), so it counts as after the fence.
-		if txn.CommitLSN >= uint64(fence) && visible {
-			rPlus = append(rPlus, txn)
+		// Transactions out of order with the fence commit around it, so a
+		// margin before this check began is enough.
+		recent, covered := ring.Between(0, uint64(pt.walAfter), began.Add(-5*time.Second))
+		if !covered {
+			return nil, errRingGap
+		}
+		for _, txn := range recent {
+			if txn.Source != pt.src.Name {
+				continue
+			}
+			visible := pt.snap.visible(txn.Xid)
+			if txn.CommitLSN < uint64(pt.fence) && !visible {
+				rMinus = append(rMinus, txn)
+			}
+			// A commit at exactly the fence's LSN comes straight after it in
+			// the WAL (see pipeline.messagePosition), so it counts as after.
+			if txn.CommitLSN >= uint64(pt.fence) && visible {
+				rPlus = append(rPlus, txn)
+			}
+		}
+		for k, val := range pt.direct {
+			direct.Add(k, val, 1)
 		}
 	}
-	reconciled := a.res
+	reconciled := cub
 	if len(rMinus)+len(rPlus) > 0 {
-		reconciled = clone(a.res)
+		reconciled = clone(cub)
 		err := p.Do(ctx, func() error {
 			if err := applyEffect(p.Engine, plan, rMinus, -1, reconciled, v.Loc); err != nil {
 				return err
@@ -244,12 +300,15 @@ func (v *Verifier) fenced(ctx context.Context, t query.Target, req *query.Reques
 		}
 		reconciled.DropZeros()
 	}
-	res := compare(cfg.Sources.Get(q.Source), reconciled, direct)
+	res := compare(cfg.Sources.Get(q.Source), reconciled, direct.DropZeros())
 	res.Mode = "fenced"
-	res.FenceLSN = fence.String()
+	res.FenceLSN = parts[0].fence.String()
 	res.RMinus, res.RPlus = len(rMinus), len(rPlus)
-	res.CuboidMS, res.DirectMS = a.ms, directMS
+	res.CuboidMS, res.DirectMS = cuboidMS, directMS
 	res.DirectSQL = Printable(sql, args, v.Loc)
+	if len(parts) > 1 {
+		res.DirectSQL = fmt.Sprintf("-- run in each of %d store databases, for its own store; this is the last:\n", len(parts)) + res.DirectSQL
+	}
 	return res, nil
 }
 
@@ -302,8 +361,13 @@ func (s snapshot) visible(xid32 uint32) bool {
 	return !s.xip[x]
 }
 
-func (v *Verifier) direct(ctx context.Context, sql string, args []any, src *config.Source) (snapshot, planner.Result, pglogrepl.LSN, error) {
-	tx, err := v.Main.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+func (v *Verifier) direct(ctx context.Context, sd Source, sql string, args []any, src *config.Source) (snapshot, planner.Result, pglogrepl.LSN, error) {
+	conn, err := pgx.Connect(ctx, sd.VerifyDSN)
+	if err != nil {
+		return snapshot{}, nil, 0, fmt.Errorf("connect to %s for the direct query: %w", sd.Name, err)
+	}
+	defer conn.Close(context.Background())
+	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return snapshot{}, nil, 0, err
 	}
@@ -318,7 +382,7 @@ func (v *Verifier) direct(ctx context.Context, sql string, args []any, src *conf
 	}
 	rows, err := tx.Query(ctx, sql, args...)
 	if err != nil {
-		return snapshot{}, nil, 0, fmt.Errorf("direct query on the main database: %w", err)
+		return snapshot{}, nil, 0, fmt.Errorf("direct query on %s: %w", sd.Name, err)
 	}
 	res := planner.Result{}
 	nm := src.Measures.Len()
@@ -506,7 +570,7 @@ func (v *Verifier) record(t query.Target, req *query.Request, res *Result) {
 	} else {
 		v.Mismatch.Add(1)
 		if v.OnMismatch != nil {
-			v.OnMismatch(fmt.Sprintf("stores %v, %s, rollup-vs-direct: %s, fence %s, reconciled -%d +%d", t.Tenants, req.Canonical, strings.Join(res.Mismatches, "; "), res.FenceLSN, res.RMinus, res.RPlus))
+			v.OnMismatch(t.Tenants, fmt.Sprintf("stores %v, %s, rollup-vs-direct: %s, fence %s, reconciled -%d +%d", t.Tenants, req.Canonical, strings.Join(res.Mismatches, "; "), res.FenceLSN, res.RMinus, res.RPlus))
 		}
 	}
 	s := Summary{At: time.Now(), Query: req.Canonical, Tenants: t.Tenants, Exact: res.Exact, CuboidMS: res.CuboidMS, DirectMS: res.DirectMS, RMinus: res.RMinus, RPlus: res.RPlus}

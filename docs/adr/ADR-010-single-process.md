@@ -14,7 +14,7 @@ Splitting CDC, engine and query services now adds failure modes the PRD does not
 
 ## Consequences
 
-This has not been tested beyond 100 stores. The scale-out path, not built: shard across slots or move to Kafka; partition engines by tenant hash; stateless query nodes invalidated by `NOTIFY`; partition cells and mirror by tenant.
+This has not been tested beyond 100 stores. Since ADR-012 every store's database is its own source, with its own slot, stream, position and loads: the unit the scale-out path moves. Not built: split the sources across processes by tenant hash, each with its own engine; stateless query nodes invalidated by `NOTIFY`; partition cells and mirror by tenant; or Kafka.
 
 ## Evidence
 

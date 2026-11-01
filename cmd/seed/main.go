@@ -1,5 +1,8 @@
 // Command seed generates the fallback dataset (Section 7.2 of the build
-// prompt) and loads it into the main database with parallel COPY.
+// prompt) and loads it with parallel COPY: the registry of stores and
+// companies into the platform database, and each store's orders, products,
+// customers and alerts into that store's own database (ADR-012), created
+// from store_template and pinned to the store with CHECK constraints.
 //
 //	seed --tier dev|small|main [--seed 42] [--anchor 2026-10-31T12:00:00+05:30]
 //
@@ -9,6 +12,7 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
 	"flag"
 	"fmt"
 	"log"
@@ -16,9 +20,11 @@ import (
 	"math/rand/v2"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	_ "time/tzdata" // the runtime image has no zone database; Asia/Kolkata must load anyway
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -94,11 +100,24 @@ func main() {
 	defer pool.Close()
 
 	if *hash {
-		var h string
-		if err := pool.QueryRow(ctx, `SELECT md5(string_agg(o::text, '|' ORDER BY tenant_id, order_id)) FROM orders o`).Scan(&h); err != nil {
+		ids, err := storeIDs(ctx, pool)
+		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println(h)
+		var parts []string
+		for _, id := range ids {
+			sp, err := storePool(ctx, *dsn, id, 1)
+			if err != nil {
+				log.Fatal(err)
+			}
+			var h string
+			if err := sp.QueryRow(ctx, `SELECT coalesce(md5(string_agg(o::text, '|' ORDER BY tenant_id, order_id)), '') FROM orders o`).Scan(&h); err != nil {
+				log.Fatal(err)
+			}
+			sp.Close()
+			parts = append(parts, h)
+		}
+		fmt.Printf("%x\n", md5.Sum([]byte(strings.Join(parts, "|"))))
 		return
 	}
 
@@ -120,7 +139,7 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for p := range work {
-				n, err := loadStore(ctx, pool, p, curve, anchor, *seed)
+				n, err := seedStore(ctx, pool, *dsn, p, curve, anchor, *seed, *analytics)
 				if err != nil {
 					errs <- fmt.Errorf("store %d: %w", p.id, err)
 					return
@@ -141,12 +160,10 @@ func main() {
 	for err := range errs {
 		log.Fatal(err)
 	}
-	loadTime := time.Since(start)
-	fmt.Printf("Loaded %d rows in %s; building indexes\n", loaded.Load(), loadTime.Round(time.Second))
-	must(finish(ctx, pool, *analytics))
+	fmt.Printf("Loaded %d rows into %d store databases in %s\n", loaded.Load(), len(plans), time.Since(start).Round(time.Second))
 	must(announceLoad(ctx, pool, false))
-	fmt.Printf("Done in %s (load %s, indexes %s)\n", time.Since(start).Round(time.Second), loadTime.Round(time.Second), (time.Since(start) - loadTime).Round(time.Second))
-	summary(ctx, pool)
+	fmt.Printf("Done in %s\n", time.Since(start).Round(time.Second))
+	summary(ctx, pool, *dsn)
 }
 
 func envOr(k, d string) string {
@@ -270,8 +287,8 @@ func titleCase(s string) string {
 }
 
 // announceLoad tells Cuboid and the store app a bulk load is running, and ends
-// any replication session, so the load is not streamed row by row. When the
-// flag clears, Cuboid finds no slot and loads a snapshot of the new data.
+// every replication session, so the load is not streamed row by row. When the
+// flag clears, Cuboid finds no slots and loads a snapshot of each store.
 func announceLoad(ctx context.Context, pool *pgxpool.Pool, loading bool) error {
 	stmts := []string{
 		"CREATE TABLE IF NOT EXISTS seed_status (id int PRIMARY KEY DEFAULT 1 CHECK (id = 1), loading boolean NOT NULL DEFAULT false)",
@@ -279,34 +296,142 @@ func announceLoad(ctx context.Context, pool *pgxpool.Pool, loading bool) error {
 		"GRANT SELECT ON seed_status TO cuboid_cdc, app",
 		fmt.Sprintf("UPDATE seed_status SET loading = %v", loading),
 	}
-	if loading {
-		stmts = append(stmts,
-			"SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name LIKE 'cuboid_%' AND active_pid IS NOT NULL",
-			"SELECT pg_sleep(0.5)",
-			"SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name LIKE 'cuboid_%' AND NOT active")
-	}
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s); err != nil {
 			return fmt.Errorf("%s: %w", s, err)
 		}
 	}
+	if !loading {
+		return nil
+	}
+	// Cuboid checks the flag every 2 seconds and may be creating a slot
+	// meanwhile; a store's database cannot be dropped while a slot uses it.
+	// Keep ending sessions and dropping slots until none has appeared for 3 s.
+	quiet := 0
+	for i := 0; i < 60 && quiet < 3; i++ {
+		var n int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM pg_replication_slots WHERE slot_name LIKE 'cuboid_%'").Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			quiet++
+		} else {
+			quiet = 0
+			pool.Exec(ctx, "SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name LIKE 'cuboid_%' AND active_pid IS NOT NULL")
+			time.Sleep(300 * time.Millisecond)
+			pool.Exec(ctx, "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name LIKE 'cuboid_%' AND NOT active")
+		}
+		time.Sleep(time.Second)
+	}
 	return nil
 }
 
+// prepare empties the registry and drops every store's database: the load
+// creates them again from the template.
 func prepare(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, "TRUNCATE tenants, companies"); err != nil {
+		return err
+	}
+	rows, err := pool.Query(ctx, "SELECT datname FROM pg_database WHERE datname ~ '^store_[0-9]+$' ORDER BY 1")
+	if err != nil {
+		return err
+	}
+	var dbs []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return err
+		}
+		dbs = append(dbs, n)
+	}
+	rows.Close()
+	for _, db := range dbs {
+		if _, err := pool.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{db}.Sanitize()+" WITH (FORCE)"); err != nil {
+			return fmt.Errorf("drop %s: %w", db, err)
+		}
+	}
+	if len(dbs) > 0 {
+		fmt.Printf("Dropped %d store databases\n", len(dbs))
+	}
+	return nil
+}
+
+// storeDatabase is a store's own database (config/metrics.yaml, tenancy.databases).
+func storeDatabase(id int32) string { return fmt.Sprintf("store_%d", id) }
+
+// storePool connects to a store's database with the seed's role.
+func storePool(ctx context.Context, dsn string, id int32, conns int32) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ConnConfig.Database = storeDatabase(id)
+	cfg.MaxConns = conns
+	cfg.ConnConfig.RuntimeParams["application_name"] = "cuboid-seed"
+	return pgxpool.NewWithConfig(ctx, cfg)
+}
+
+func storeIDs(ctx context.Context, pool *pgxpool.Pool) ([]int32, error) {
+	rows, err := pool.Query(ctx, "SELECT tenant_id FROM tenants ORDER BY 1")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int32
+	for rows.Next() {
+		var id int32
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// seedStore creates one store's database from the template, pins every table
+// to that store, loads it and builds its indexes: a store from start to end,
+// on one worker, while other workers do other stores.
+func seedStore(ctx context.Context, platform *pgxpool.Pool, dsn string, p *storePlan, cv *curve, anchor time.Time, seed uint64, analytics bool) (int64, error) {
+	db := pgx.Identifier{storeDatabase(p.id)}.Sanitize()
+	var err error
+	for i := 0; i < 30; i++ {
+		// The template refuses to be copied while anyone is connected to it,
+		// such as Cuboid reading its schema at startup: wait and retry.
+		if _, err = platform.Exec(ctx, "CREATE DATABASE "+db+" TEMPLATE store_template"); err == nil || !strings.Contains(err.Error(), "being accessed by other users") {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("create %s: %w", db, err)
+	}
+	pool, err := storePool(ctx, dsn, p.id, 2)
+	if err != nil {
+		return 0, err
+	}
+	defer pool.Close()
 	stmts := []string{
-		"TRUNCATE orders, customers, products, soc_alerts, tenants, companies",
-		"DROP INDEX IF EXISTS orders_customer_time, orders_tenant_time, orders_tenant_status_time, orders_tenant_product_time",
+		// Separation at the source: no row of another store can be written here.
+		fmt.Sprintf("ALTER TABLE orders ADD CONSTRAINT orders_one_store CHECK (tenant_id = %d)", p.id),
+		fmt.Sprintf("ALTER TABLE products ADD CONSTRAINT products_one_store CHECK (tenant_id = %d)", p.id),
+		fmt.Sprintf("ALTER TABLE customers ADD CONSTRAINT customers_one_store CHECK (tenant_id = %d)", p.id),
+		fmt.Sprintf("ALTER TABLE soc_alerts ADD CONSTRAINT soc_alerts_one_store CHECK (tenant_id = %d)", p.id),
+		// Loaded without them, built after: faster than maintaining them row by row.
 		"ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_pkey",
 		"ALTER TABLE customers DROP CONSTRAINT IF EXISTS customers_pkey",
 		"ALTER TABLE soc_alerts DROP CONSTRAINT IF EXISTS soc_alerts_pkey",
 	}
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s); err != nil {
-			return fmt.Errorf("%s: %w", s, err)
+			return 0, fmt.Errorf("%s: %w", s, err)
 		}
 	}
-	return nil
+	n, err := loadStore(ctx, pool, p, cv, anchor, seed)
+	if err != nil {
+		return 0, err
+	}
+	return n, finishStore(ctx, pool, analytics)
 }
 
 func insertStores(ctx context.Context, pool *pgxpool.Pool, plans []*storePlan) error {
@@ -327,7 +452,8 @@ func insertStores(ctx context.Context, pool *pgxpool.Pool, plans []*storePlan) e
 	return nil
 }
 
-func finish(ctx context.Context, pool *pgxpool.Pool, analytics bool) error {
+// finishStore builds a store's keys and indexes in its own database.
+func finishStore(ctx context.Context, pool *pgxpool.Pool, analytics bool) error {
 	stmts := []string{
 		"ALTER TABLE orders ADD PRIMARY KEY (tenant_id, order_id)",
 		"ALTER TABLE customers ADD PRIMARY KEY (tenant_id, customer_id)",
@@ -344,40 +470,42 @@ func finish(ctx context.Context, pool *pgxpool.Pool, analytics bool) error {
 	}
 	stmts = append(stmts, "ANALYZE")
 	for _, s := range stmts {
-		t := time.Now()
 		if _, err := pool.Exec(ctx, s); err != nil {
 			return fmt.Errorf("%s: %w", s, err)
 		}
-		fmt.Printf("  %-80s %s\n", s, time.Since(t).Round(100*time.Millisecond))
 	}
 	return nil
 }
 
-func summary(ctx context.Context, pool *pgxpool.Pool) {
-	rows, err := pool.Query(ctx, `SELECT tenant_id, count(*) FROM orders GROUP BY 1 ORDER BY 2 DESC`)
+func summary(ctx context.Context, platform *pgxpool.Pool, dsn string) {
+	ids, err := storeIDs(ctx, platform)
 	if err != nil {
 		return
 	}
-	defer rows.Close()
 	var total, largest, smallest int64
 	var largestID int32
 	smallest = math.MaxInt64
-	n := 0
-	for rows.Next() {
-		var t int32
+	for _, id := range ids {
+		pool, err := storePool(ctx, dsn, id, 1)
+		if err != nil {
+			continue
+		}
 		var c int64
-		rows.Scan(&t, &c)
-		if n == 0 {
-			largest, largestID = c, t
+		pool.QueryRow(ctx, "SELECT count(*) FROM orders").Scan(&c)
+		pool.Close()
+		if c > largest {
+			largest, largestID = c, id
 		}
 		if c < smallest {
 			smallest = c
 		}
 		total += c
-		n++
 	}
-	fmt.Printf("Orders: %d across %d stores. Largest: store %d with %d (%.1f%%). Smallest: %d.\n",
-		total, n, largestID, largest, 100*float64(largest)/float64(total), smallest)
+	if total == 0 {
+		return
+	}
+	fmt.Printf("Orders: %d across %d stores, each in its own database. Largest: store %d with %d (%.1f%%). Smallest: %d.\n",
+		total, len(ids), largestID, largest, 100*float64(largest)/float64(total), smallest)
 }
 
 // curve is the order-time distribution over the 24 months before the anchor:

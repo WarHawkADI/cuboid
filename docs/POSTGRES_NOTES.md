@@ -31,5 +31,12 @@ A transaction can have its commit record before a fence and still be invisible t
 - `date_trunc(field, timestamptz, zone)` needs Postgres 14 or later.
 - `set_config(name, value, true)` is transaction-local, which is what makes a pooled connection safe to reuse across tenants.
 
+### One database per store (ADR-012)
+- **A template with a connection cannot be copied.** `CREATE DATABASE store_42 TEMPLATE store_template` fails with "source database is being accessed by other users" while anyone is connected to the template. Cuboid connects to it only to read the store schema at startup; the seed retries.
+- **A database with a replication slot cannot be dropped.** The seed ends every Cuboid session and drops its slots, and keeps doing so until none has appeared for 3 seconds, before it drops store databases: Cuboid may be creating one meanwhile.
+- **COPY FROM is refused under forced row-level security, so a store's load copies into a temporary table.** A store reloads in one transaction, into the live mirror, which forces RLS. The rows land in a `TEMP` table first and move with `INSERT ... SELECT` in the same transaction.
+- **Every WAL sender reads the whole server's WAL.** A logical slot belongs to one database, but its sender decodes every record on the server and skips other databases'. With a slot per store, decoding work grows with the number of stores. `logical_decoding_work_mem` is set to 16 MB, since it is per sender.
+- **Stores' dictionary values are seeded before their load.** Stores loading at once would otherwise insert the same dimension values in their long transactions and wait on one another. Each load inserts its values in a short transaction first, in a fixed order.
+
 ## Windows note for the native development path
 `pg_ctl start` leaves the server holding the caller's stdout. A pipeline such as `pg_ctl ... | tail` never finishes, so `tools/devdb.sh` redirects it to a file.

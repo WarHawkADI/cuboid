@@ -60,16 +60,14 @@ func (c *Core) Reload(ctx context.Context) *ReloadReport {
 	if !reflect.DeepEqual(old.Sources.Keys(), next.Sources.Keys()) {
 		return fail(fmt.Errorf("adding or removing source tables changes the publication and the mirror; restart Cuboid for that"))
 	}
+	if !reflect.DeepEqual(old.Tenancy, next.Tenancy) {
+		return fail(fmt.Errorf("tenancy decides which databases are streamed; restart Cuboid to change it"))
+	}
 	plain, err := cdc.ConnectPlain(ctx, c.Opt.MainCDCDSN, "cuboid-reload")
 	if err != nil {
 		return fail(err)
 	}
-	all, _, err := store.Catalog(ctx, plain, next)
-	if err != nil {
-		plain.Close(ctx)
-		return fail(err)
-	}
-	checks, err := store.Checks(ctx, plain, next)
+	all, _, checks, err := catalog(ctx, plain, c.Opt.MainCDCDSN, next)
 	plain.Close(ctx)
 	if err != nil {
 		return fail(err)
@@ -123,7 +121,7 @@ func (c *Core) Reload(ctx context.Context) *ReloadReport {
 	}
 	if len(build) == 0 {
 		if p := c.Pipeline(); p != nil {
-			if _, err := p.Pause(ctx, switchEngine); err != nil {
+			if err := p.Pause(ctx, switchEngine); err != nil {
 				return fail(err)
 			}
 			if err := p.Resume(ctx); err != nil {

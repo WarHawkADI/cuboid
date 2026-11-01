@@ -5,14 +5,15 @@ package core
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/jackc/pglogrepl"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/time/rate"
 
@@ -86,13 +87,21 @@ type Core struct {
 	cfg     atomic.Pointer[config.Config] // the engine's configuration
 	engine  *engine.Engine
 	flusher *flush.Flusher
-	pipe    atomic.Pointer[pipeline.Pipeline]
-	ready   sync.Map // rollup name -> bool
+	pipe    atomic.Pointer[pipeline.Pipeline] // one for the process; every source feeds it
+	ready   sync.Map                          // rollup name -> bool
 	state   atomic.Value
 
-	opMu       sync.Mutex // one rebuild or reload at a time
-	streamStop atomic.Pointer[context.CancelFunc]
-	mainReq    chan string
+	// opMu: a rebuild from the mirror or a config reload holds it alone;
+	// loads of source databases share it, and run in parallel.
+	opMu       sync.RWMutex
+	platformDB string        // the main DSN's database: the store registry
+	platform   *pgxpool.Pool // cuboid_cdc on it, to read the registry
+	srcMu      sync.Mutex
+	sources    map[string]*source
+	loadSlots  chan struct{} // loads that may run at once
+	loads      loadBatch
+	dataLoad   atomic.Bool // a bulk load runs on the main server
+	analyzeDue atomic.Bool
 	StartedAt  time.Time
 
 	lastAutoRebuild atomic.Int64
@@ -124,7 +133,7 @@ func (c *Core) Pipeline() *pipeline.Pipeline { return c.pipe.Load() }
 // New connects everything and checks every invariant that can be checked
 // before streaming starts.
 func New(ctx context.Context, opt Options) (*Core, error) {
-	c := &Core{Opt: opt, Log: opt.Log, mainReq: make(chan string, 1), StartedAt: time.Now()}
+	c := &Core{Opt: opt, Log: opt.Log, StartedAt: time.Now(), sources: map[string]*source{}, loadSlots: make(chan struct{}, 4)}
 	c.setState("starting")
 	// I1: the only main-database roles Cuboid may hold.
 	if err := cdc.CheckRole(ctx, opt.MainCDCDSN, "cuboid_cdc"); err != nil {
@@ -164,18 +173,25 @@ func New(ctx context.Context, opt Options) (*Core, error) {
 	if c.Loc, err = time.LoadLocation(tz); err != nil {
 		return nil, fmt.Errorf("main database time zone %q: %w", tz, err)
 	}
-	all, specs, err := store.Catalog(ctx, plain, cfg)
+	all, specs, checks, err := catalog(ctx, plain, opt.MainCDCDSN, cfg)
 	if err != nil {
 		return nil, err
 	}
 	if err := cfg.ValidateColumns(all); err != nil {
 		return nil, err
 	}
-	checks, err := store.Checks(ctx, plain, cfg)
+	if err := cfg.ValidateNonnegative(checks); err != nil {
+		return nil, err
+	}
+	c.platformDB = plain.Config().Database
+	pcfg, err := pgxpool.ParseConfig(opt.MainCDCDSN)
 	if err != nil {
 		return nil, err
 	}
-	if err := cfg.ValidateNonnegative(checks); err != nil {
+	delete(pcfg.ConnConfig.RuntimeParams, "replication")
+	pcfg.MaxConns = 2
+	pcfg.ConnConfig.RuntimeParams["application_name"] = "cuboid-registry"
+	if c.platform, err = pgxpool.NewWithConfig(ctx, pcfg); err != nil {
 		return nil, err
 	}
 	c.Specs = specs
@@ -230,6 +246,20 @@ func New(ctx context.Context, opt Options) (*Core, error) {
 	c.flusher = &flush.Flusher{Store: st, Specs: specs, Dict: c.Dict, Loc: c.Loc, Now: time.Now, Log: c.Log, Notify: "cuboid_changes",
 		Building: func(name string) bool { return !c.isReady(name) }}
 	c.engine = engine.New(cfg, c.Loc, time.Now, c.loadDims)
+	p := pipeline.New(c.engine, c.flusher, c.Log)
+	p.Interval = opt.FlushInterval
+	p.TenantColumn = cfg.Tenancy.TenantColumn
+	p.OnFlush = c.onFlush
+	p.OnTruncate = func(name string, tables []string) {
+		c.Rec.Annotate(fmt.Sprintf("TRUNCATE in %s: reloading it alone", name))
+	}
+	p.OnEvent = func(kind, sev, detail string) {
+		c.Audit.Event(audit.Event{Kind: kind, Severity: sev, Detail: detail})
+		if sev == "P1" {
+			c.Alarms.Raise(kind, detail)
+		}
+	}
+	c.pipe.Store(p)
 	c.Svc = &query.Service{
 		Store: st, Dict: c.Dict, Loc: c.Loc, Now: time.Now,
 		Cache: cache.New(lim.CacheEntries, c.Hist), Hist: c.Hist, Limits: c.Limits, Members: c.Members,
@@ -238,14 +268,14 @@ func New(ctx context.Context, opt Options) (*Core, error) {
 	}
 	c.Svc.SetActive(c.active(cfg))
 	c.Hub = query.NewHub(c.Svc, lim.SSEPerTenant)
-	c.Verify = &verify.Verifier{Main: c.Main, Emitter: c.Emitter, Pipeline: c.Pipeline, Svc: c.Svc, Store: st, Loc: c.Loc,
+	c.Verify = &verify.Verifier{Sources: c.verifySources, Pipeline: c.Pipeline, Svc: c.Svc, Store: st, Loc: c.Loc,
 		Limit: rate.NewLimiter(rate.Limit(float64(lim.VerifyPerMinute)/60), 10)}
-	c.Verify.OnMismatch = func(detail string) {
+	c.Verify.OnMismatch = func(tenants []int32, detail string) {
 		c.Audit.Event(audit.Event{Kind: "verification_mismatch", Severity: "P1", Detail: detail})
 		c.Alarms.Raise("verification_mismatch", "A check against the main database did not match: "+detail)
 		// Bonus B-2: a failed check triggers a rebuild, at most once in ten minutes.
 		if last := c.lastAutoRebuild.Load(); time.Now().Unix()-last > 600 && c.lastAutoRebuild.CompareAndSwap(last, time.Now().Unix()) {
-			c.RebuildFromMain("a check against the main database failed")
+			c.ReloadStores(tenants, "a check against the main database failed")
 		}
 	}
 	c.Sampler = &verify.Sampler{V: c.Verify, Members: c.Members, Every: 30 * time.Second}
@@ -267,27 +297,28 @@ func (c *Core) isReady(name string) bool {
 	return ok && v.(bool)
 }
 
-func (c *Core) freshness() store.Freshness {
-	p := c.Pipeline()
-	if p == nil {
-		var f store.Freshness
-		var lsn string
-		var commit, hb *time.Time
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if c.Store.W.QueryRow(ctx, "SELECT applied_lsn::text, applied_commit_time, heartbeat_time FROM cdc_state").Scan(&lsn, &commit, &hb) == nil {
-			f.LSN = lsn
-			if commit != nil {
-				f.CommitTime = *commit
-			}
-			if hb != nil {
-				f.Heartbeat = *hb
-			}
+// freshness is how fresh the given stores' data is: the oldest of their
+// source databases. tenants nil means every source.
+func (c *Core) freshness(tenants []int32) store.Freshness {
+	p := c.pipe.Load()
+	perStore := c.Config().PerStore()
+	c.srcMu.Lock()
+	var names []string
+	for _, s := range c.sources {
+		if tenants == nil || !perStore || (s.tenant != 0 && containsInt32(tenants, s.tenant)) {
+			names = append(names, s.name)
 		}
-		return f
 	}
-	commit, hb := p.AppliedTimes()
-	return store.Freshness{LSN: p.Applied().String(), CommitTime: commit, Heartbeat: hb}
+	c.srcMu.Unlock()
+	var oldest store.Freshness
+	for i, name := range names {
+		commit, hb := p.AppliedTimes(name)
+		f := store.Freshness{LSN: p.Applied(name).String(), CommitTime: commit, Heartbeat: hb}
+		if i == 0 || f.AsOf().Before(oldest.AsOf()) {
+			oldest = f
+		}
+	}
+	return oldest
 }
 
 func (c *Core) loadMembership(ctx context.Context) error {
@@ -391,81 +422,12 @@ func (c *Core) DemoKey(kind auth.Kind, id int32) string {
 func (c *Core) Run(ctx context.Context) error {
 	go c.Audit.Run(ctx)
 	go c.Hub.Run(ctx)
-	go c.Emitter.Heartbeats(ctx, time.Second, func(err error) { c.Log.Warn("heartbeat", "err", err) })
 	go c.background(ctx)
 	go c.Rec.Run(ctx, c.sample)
 	go c.Sampler.Run(ctx)
 	go c.finishInterruptedBuilds(ctx)
-	return c.streamLoop(ctx)
-}
-
-// streamLoop keeps the change stream running, recovering from errors and
-// performing rebuilds from the main database when needed.
-func (c *Core) streamLoop(ctx context.Context) error {
-	backoff := time.Second
-	for ctx.Err() == nil {
-		select {
-		case reason := <-c.mainReq:
-			if err := c.rebuildFromMain(ctx, reason); err != nil {
-				c.Alarms.Raise("rebuild_failed", "Rebuild from the main database failed: "+err.Error())
-				c.Log.Error("rebuild from main", "err", err)
-				time.Sleep(backoff)
-			}
-			continue
-		default:
-		}
-		if c.Emitter.Loading(ctx) {
-			if c.State() != "waiting for the data load" {
-				c.setState("waiting for the data load")
-			}
-			time.Sleep(2 * time.Second)
-			continue
-		}
-		var slot, applied string
-		var backfilled *time.Time
-		if err := c.Store.W.QueryRow(ctx, "SELECT coalesce(slot, ''), applied_lsn::text, backfilled_at FROM cdc_state").Scan(&slot, &applied, &backfilled); err != nil {
-			c.Log.Error("read cdc state", "err", err)
-			time.Sleep(backoff)
-			continue
-		}
-		health, err := c.Emitter.Health(ctx, slot)
-		if err != nil {
-			c.Log.Error("read slot health", "err", err)
-			time.Sleep(backoff)
-			continue
-		}
-		if backfilled == nil || slot == "" || !health.Exists {
-			reason := "first start: loading from a snapshot of the main database"
-			if backfilled != nil {
-				reason = "the replication slot is missing, so the stream cannot resume exactly"
-			}
-			if err := c.rebuildFromMain(ctx, reason); err != nil {
-				c.Alarms.Raise("rebuild_failed", "Initial load failed: "+err.Error())
-				c.Log.Error("initial load", "err", err)
-				time.Sleep(backoff)
-			}
-			continue
-		}
-		start, _ := pglogrepl.ParseLSN(applied)
-		err = c.stream(ctx, slot, start)
-		switch {
-		case ctx.Err() != nil:
-			return nil
-		case errors.Is(err, cdc.ErrTruncated):
-			c.requestMainRebuild("TRUNCATE on the main database")
-		case errors.Is(err, errStopForRebuild):
-		case err != nil:
-			c.Alarms.Raise("stream_error", "The change stream stopped: "+err.Error()+". Reconnecting.")
-			c.Log.Error("stream", "err", err)
-			time.Sleep(backoff)
-			if backoff < 10*time.Second {
-				backoff *= 2
-			}
-			continue
-		}
-		backoff = time.Second
-	}
-	return nil
+	go c.supervise(ctx)
+	return c.pipe.Load().Run(ctx)
 }
 
 // finishInterruptedBuilds builds rollups a crash left unbuilt: a reload that
@@ -493,47 +455,6 @@ func (c *Core) finishInterruptedBuilds(ctx context.Context) {
 		case <-time.After(time.Second):
 		}
 	}
-}
-
-var errStopForRebuild = errors.New("stopped for a rebuild from the main database")
-
-func (c *Core) requestMainRebuild(reason string) {
-	select {
-	case c.mainReq <- reason:
-	default:
-	}
-}
-
-// stream runs one replication session.
-func (c *Core) stream(ctx context.Context, slot string, start pglogrepl.LSN) error {
-	sctx, cancel := context.WithCancelCause(ctx)
-	stop := context.CancelFunc(func() { cancel(errStopForRebuild) })
-	c.streamStop.Store(&stop)
-	defer func() { c.streamStop.Store(nil); cancel(nil) }()
-	conn, err := cdc.ConnectReplication(sctx, c.Opt.MainCDCDSN)
-	if err != nil {
-		return err
-	}
-	defer conn.Close(context.Background())
-	p := pipeline.New(c.engine, c.flusher, start, c.Log)
-	p.Interval = c.Opt.FlushInterval
-	p.OnFlush = c.onFlush
-	p.OnEvent = func(kind, sev, detail string) {
-		c.Audit.Event(audit.Event{Kind: kind, Severity: sev, Detail: detail})
-		if sev == "P1" {
-			c.Alarms.Raise(kind, detail)
-		}
-	}
-	c.pipe.Store(p)
-	defer c.pipe.Store(nil)
-	c.setState("streaming")
-	c.Alarms.Clear("stream_error")
-	s := &cdc.Stream{Conn: conn, Slot: slot, Publication: c.Opt.Publication, Log: c.Log}
-	err = s.Run(sctx, start, p)
-	if cause := context.Cause(sctx); errors.Is(cause, errStopForRebuild) {
-		return errStopForRebuild
-	}
-	return err
 }
 
 func (c *Core) onFlush(res *flush.Result) {
@@ -578,26 +499,40 @@ func (c *Core) background(ctx context.Context) {
 
 // checkHealth raises and clears the alarms of Section 8.5.
 func (c *Core) checkHealth(ctx context.Context) {
-	var slot string
-	c.Store.W.QueryRow(ctx, "SELECT coalesce(slot, '') FROM cdc_state").Scan(&slot)
-	h, err := c.Emitter.Health(ctx, slot)
+	slots, err := c.Emitter.Slots(ctx, "cuboid_")
 	if err == nil {
-		c.Rec.SetSlot(h)
-		if h.RetainedWAL > 1<<30 {
-			c.Alarms.Raise("slot_wal", fmt.Sprintf("The replication slot holds %d MB of WAL on the main database (alarm above 1024 MB; capped by max_slot_wal_keep_size).", h.RetainedWAL>>20))
+		// The slot holding the most WAL is the one that matters: every slot
+		// shares the server's WAL, so one lagging source holds it for all.
+		var worst cdc.SlotHealth
+		var worstName string
+		for name, h := range slots {
+			if !worst.Exists || h.RetainedWAL > worst.RetainedWAL {
+				worst, worstName = h, name
+			}
+		}
+		c.Rec.SetSlot(worst)
+		if worst.RetainedWAL > 1<<30 {
+			c.Alarms.Raise("slot_wal", fmt.Sprintf("Replication slot %s holds %d MB of WAL on the main server (alarm above 1024 MB; capped by max_slot_wal_keep_size).", worstName, worst.RetainedWAL>>20))
 		} else {
 			c.Alarms.Clear("slot_wal")
 		}
-		if h.Exists && h.WALStatus != "reserved" && h.WALStatus != "" {
-			c.Alarms.Raise("slot_status", "Replication slot wal_status is "+h.WALStatus+".")
+		var bad []string
+		for name, h := range slots {
+			if h.WALStatus != "reserved" && h.WALStatus != "" {
+				bad = append(bad, name+" is "+h.WALStatus)
+			}
+		}
+		if len(bad) > 0 {
+			sort.Strings(bad)
+			c.Alarms.Raise("slot_status", "Replication slot wal_status: "+strings.Join(bad, "; ")+".")
 		} else {
 			c.Alarms.Clear("slot_status")
 		}
 	}
-	f := c.freshness()
+	f := c.freshness(nil)
 	if as := f.AsOf(); !as.IsZero() && c.State() == "streaming" {
 		if lag := time.Since(as); lag > 30*time.Second {
-			c.Alarms.Raise("lag", fmt.Sprintf("Data lag is %s (alarm above 30 s).", lag.Round(time.Second)))
+			c.Alarms.Raise("lag", fmt.Sprintf("Data lag of the stalest source is %s (alarm above 30 s).", lag.Round(time.Second)))
 		} else {
 			c.Alarms.Clear("lag")
 		}
@@ -620,4 +555,51 @@ func (c *Core) expireCells(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// catalog reads the source tables' columns and validated CHECK constraints:
+// the registry's from the platform's database and, with per-store databases,
+// every other table's from the template each store's database is created
+// from. It returns the columns of every table, the mirror specs and the
+// constraint definitions, by table.
+func catalog(ctx context.Context, plain *pgx.Conn, dsn string, cfg *config.Config) (map[string][]string, map[string]*store.Table, map[string][]string, error) {
+	all, specs, err := store.Catalog(ctx, plain, cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	checks, err := store.Checks(ctx, plain, cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if !cfg.PerStore() {
+		return all, specs, checks, nil
+	}
+	tdsn, err := cdc.WithDatabase(dsn, cfg.Tenancy.Databases.Template)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	// Held only for these two reads: CREATE DATABASE ... TEMPLATE refuses a
+	// template that has a connection open.
+	tconn, err := cdc.ConnectPlain(ctx, tdsn, "cuboid-setup")
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("connect to the store template %s: %w", cfg.Tenancy.Databases.Template, err)
+	}
+	defer tconn.Close(ctx)
+	tall, tspecs, err := store.Catalog(ctx, tconn, cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tchecks, err := store.Checks(ctx, tconn, cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, src := range cfg.SourcesOn(false) {
+		all[src.Name], checks[src.Name] = tall[src.Name], tchecks[src.Name]
+		if t := tspecs[src.Name]; t != nil {
+			specs[src.Name] = t
+		} else {
+			delete(specs, src.Name)
+		}
+	}
+	return all, specs, checks, nil
 }

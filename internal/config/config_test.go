@@ -38,6 +38,9 @@ func TestInvalidConfigIsRefused(t *testing.T) {
 		{"rank on text", "dims: [customer_id],         grains: {month: all}, rank: true", "dims: [status],         grains: {month: all}, rank: true"},
 		{"rank with days", "dims: [customer_id],         grains: {month: all}, rank: true", "dims: [customer_id],         grains: {day: all, month: all}, rank: true"},
 		{"rank with short months", "dims: [customer_id],         grains: {month: all}, rank: true", "dims: [customer_id],         grains: {month: 90d}, rank: true"},
+		// Per-store databases need a name for each store's and a template.
+		{"store database without the store", `databases: {store: "store_{tenant}"`, `databases: {store: "store_x"`},
+		{"no store template", `template: store_template}`, `template: ""}`},
 	}
 	for _, c := range cases {
 		if !strings.Contains(base, c.old) {
@@ -100,6 +103,33 @@ func TestPIIColumnsAreDeclared(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("customers.%s is not marked as PII", col)
+		}
+	}
+}
+
+// Each store's data sits in its own database; the main DSN's holds only the
+// registry of stores.
+func TestPerStoreDatabases(t *testing.T) {
+	cfg, err := Parse([]byte(shipped(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.PerStore() || cfg.StoreDatabase(42) != "store_42" {
+		t.Fatalf("store 42's database: %q", cfg.StoreDatabase(42))
+	}
+	var platform, store []string
+	for _, s := range cfg.SourcesOn(true) {
+		platform = append(platform, s.Name)
+	}
+	for _, s := range cfg.SourcesOn(false) {
+		store = append(store, s.Name)
+	}
+	if strings.Join(platform, ",") != "tenants" {
+		t.Errorf("platform database holds %v, want only the registry", platform)
+	}
+	for _, want := range []string{"orders", "products", "customers", "soc_alerts"} {
+		if !strings.Contains(","+strings.Join(store, ",")+",", ","+want+",") {
+			t.Errorf("%s is not in each store's database: %v", want, store)
 		}
 	}
 }

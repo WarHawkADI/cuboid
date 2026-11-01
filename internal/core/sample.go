@@ -69,7 +69,7 @@ func (c *Core) sample(ctx context.Context) monitor.Point {
 	if err := c.Main.QueryRow(ctx, "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND backend_type = 'client backend' AND pid <> pg_backend_pid()").Scan(&active); err == nil {
 		p.MainActive = active
 	}
-	if as := c.freshness().AsOf(); !as.IsZero() {
+	if as := c.freshness(nil).AsOf(); !as.IsZero() {
 		p.LagMS = time.Since(as).Milliseconds()
 	}
 	return p
