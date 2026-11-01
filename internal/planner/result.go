@@ -125,7 +125,11 @@ func (pl *Plan) EvalMemory(cells map[engine.CellKey][]int64, facts []*engine.Fac
 		for _, e := range pl.Edges {
 			if !f.Time.Before(e.From) && f.Time.Before(e.To) {
 				if k, ok := pl.KeyOfFact(f, loc); ok {
-					out.Add(k, f.Measures, 1)
+					sign := int64(1)
+					if e.Minus {
+						sign = -1
+					}
+					out.Add(k, f.Measures, sign)
 				}
 				break
 			}

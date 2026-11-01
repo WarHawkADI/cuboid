@@ -18,6 +18,7 @@ func writeReport() {
 - **Uncached** means the request carries the operator bench header, which skips the answer cache. It still goes through the API, planner and row security.
 - **Viewers** are simulated dashboards refreshing at human pace against Cuboid, with its cache on.
 - **Same data and app workload** for every path. The direct baseline has the indexes and connection pooling a careful team would give it.
+- **Query speed is timed once the machine has settled after a load**, at both tiers: no autovacuum running and a load average under 4 for a minute. The store app keeps writing throughout. Straight after a 10M load, autovacuum on the new tables lifts the load average to about 32, and single answers come several times slower.
 - Data is synthetic: ` + "`cmd/seed`" + `, with one store far larger than the rest, as the PRD describes.
 
 `)
@@ -84,8 +85,8 @@ func writeReport() {
 	}
 
 	b.WriteString(`## Limits of these numbers
-- One laptop, one run of each test. Treat small differences as noise.
-- Top customers ranks a few hundred customers through month totals instead of every one in the range (ADR-011). It is still the slowest query and the worst growth ratio.
+- One machine, one run of each test. Treat small differences as noise.
+- Top customers ranks through month totals instead of every customer in the range (ADR-011). It is still the slowest query and the worst growth ratio, and still grows with the largest store's size.
 - Isolation and chaos totals are on the Results page and in ` + "`artifacts/`" + `, with the tier each ran at.
 - ` + "`REPLICA IDENTITY FULL`" + `'s extra WAL has not been measured.
 `)

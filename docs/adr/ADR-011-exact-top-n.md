@@ -29,11 +29,21 @@ Running totals for preset windows change the exactly-once flush path, the riskie
 
 `internal/query/rank_test.go` compares the walk with ranking every key on random data, with a random split of each month, ties and several stores. `TestSplitRangeTilesTheRange` checks that the split covers each range exactly once. The fenced check compares each pushed-down list with the full result of the same snapshot, and that result with the main database: 150 of 150 exact at 1M, over every store, company scopes, all three measures, n from 1 to 100, every preset and random timestamps.
 
-Measured on 31 October 2026 with `bench speed`, top 10 customers by orders over `last_30d`, at both tiers on one 16-CPU Linux machine:
+Measured on 31 October 2026 with `bench speed`, top 10 customers by orders over `last_30d`, at both tiers on one 16-CPU Linux machine, with all stores in one database:
 
 | | 1M | 10M | Ratio | Before |
 |---|---:|---:|---:|---:|
 | Largest store, slowest of 5 | 16.2 ms | 59.3 ms | 3.66x | 13.66x |
 | All stores, p99 | 16.2 ms | 48.5 ms | 2.99x | 12.64x |
 
-These are the rows in `artifacts/speed/` and `artifacts/growth/latest.json`; the other rows there are from the earlier build. A second 10M run, started straight after a rebuild, gave the same median growth (13.1 to 29.5 ms, 2.3x) but one first-touch sample of 154 ms; top products, unchanged, showed the same (13 ms median, 222 ms slowest). On the same 10M data, the full query this replaces took about 115 ms in SQL alone, before its total for shares.
+These rows are in `artifacts/speed/` and `artifacts/growth/latest.json` as of commit 9571411. A second 10M run, started straight after a rebuild, gave the same median growth (13.1 to 29.5 ms, 2.3x) but one first-touch sample of 154 ms; top products, unchanged, showed the same (13 ms median, 222 ms slowest). On the same 10M data, the full query this replaces took about 115 ms in SQL alone, before its total for shares.
+
+Re-measured on 1 November 2026 with each store in its own database (ADR-012), at both tiers on the same machine, once it had settled after each load (no autovacuum running, load average under 4 for a minute):
+
+| | 1M | 10M | Ratio |
+|---|---:|---:|---:|
+| Largest store, median of 5 | 4.8 ms | 39.7 ms | 8.25x |
+| Largest store, slowest of 5 | 6.0 ms | 46.6 ms | 7.76x |
+| All stores, p99 | 12.5 ms | 53.9 ms | 4.32x |
+
+The largest store has 6.9 times the orders at 10M, and the walk's time grows nearly as much: T5 is Not met. Timed straight after each load instead, before autovacuum had run, the 1M median was 12.2 ms and the 10M slowest 151 ms (11.4x). On the 10M tier, 120 samples of this query on the largest store had a median of 28 ms; the two slow ones (50 and 112 ms) came while the machine's load average was 32, and at 14 and 6 none passed 31 ms. Whether the one-database figures of 31 October were taken before or after autovacuum was not recorded, so their 3.66x is not directly comparable.

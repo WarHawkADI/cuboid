@@ -14,9 +14,12 @@ export interface NumberRef {
 }
 
 // Blocks are proportional to time span: whole months, days and hours from
-// rollup cells, and the thin edges read row by row from the mirror.
+// rollup cells, and the thin edges read row by row from the mirror. A minus
+// edge lies inside a whole bucket already drawn, so it is only counted below.
 function SliceStrip({ env }: { env: Envelope<unknown> }) {
   const plan = env.meta.plan;
+  const minus = plan.edges.filter((e) => e.minus).length;
+  const plus = plan.edges.length - minus;
   type Block = { from: number; to: number; label: string; cls: string };
   const blocks: Block[] = [
     ...plan.segments.map((s: Segment) => ({
@@ -25,7 +28,7 @@ function SliceStrip({ env }: { env: Envelope<unknown> }) {
       label: `${s.buckets} ${s.grain}${s.buckets === 1 ? "" : "s"}`,
       cls: `g-${s.grain}`,
     })),
-    ...plan.edges.map((e) => ({ from: Date.parse(e.from), to: Date.parse(e.to), label: "", cls: "edge" })),
+    ...plan.edges.filter((e) => !e.minus).map((e) => ({ from: Date.parse(e.from), to: Date.parse(e.to), label: "", cls: "edge" })),
   ].sort((a, b) => a.from - b.from);
   if (blocks.length === 0) return <p className="empty">This range holds no time, so nothing is read.</p>;
   const total = blocks.reduce((a, b) => a + (b.to - b.from), 0) || 1;
@@ -40,7 +43,8 @@ function SliceStrip({ env }: { env: Envelope<unknown> }) {
       </div>
       <p className="label small">
         {plan.segments.map((s) => `${s.buckets} ${s.grain}${s.buckets === 1 ? "" : "s"}`).join(", ") || "No whole buckets"}
-        {plan.edges.length > 0 ? `, plus ${plan.edges.length} edge${plan.edges.length === 1 ? "" : "s"} from the mirror` : ""}.
+        {plus > 0 ? `, plus ${plus} edge${plus === 1 ? "" : "s"} from the mirror` : ""}
+        {minus > 0 ? `, less ${minus} slice${minus === 1 ? "" : "s"} outside the range` : ""}.
       </p>
     </div>
   );

@@ -289,7 +289,7 @@ func (w *world) change(t *rapid.T) []engine.Change {
 	}
 }
 
-func (w *world) drawQuery(t *rapid.T) *planner.Query {
+func (w *world) drawQuery(t *rapid.T, now time.Time) *planner.Query {
 	q := &planner.Query{Source: "orders", Filters: map[string]string{}}
 	switch rapid.IntRange(0, 2).Draw(t, "scope") {
 	case 0, 1:
@@ -298,7 +298,7 @@ func (w *world) drawQuery(t *rapid.T) *planner.Query {
 		q.Tenants = []int32{1, 3} // a company with two stores
 	}
 	if rapid.Bool().Draw(t, "preset") {
-		q.From, q.To, _ = timeutil.ResolvePreset(rapid.SampledFrom(timeutil.Presets).Draw(t, "range"), fixedNow, loc)
+		q.From, q.To, _ = timeutil.ResolvePreset(rapid.SampledFrom(timeutil.Presets).Draw(t, "range"), now, loc)
 	} else {
 		a, b := drawTime(t, "from"), drawTime(t, "to")
 		if b.Before(a) {
@@ -319,8 +319,12 @@ func (w *world) drawQuery(t *rapid.T) *planner.Query {
 }
 
 func (w *world) check(t *rapid.T) {
-	p := &planner.Planner{Cfg: w.cfg, Loc: loc, Now: func() time.Time { return fixedNow }}
-	q := w.drawQuery(t)
+	// The planner's clock runs up to an hour past the data's, so ranges end
+	// inside an hour that already holds rows dated after now: the current
+	// hour's cell less those rows must still be exact.
+	now := fixedNow.Add(time.Duration(rapid.Int64Range(0, 3599).Draw(t, "now")) * time.Second)
+	p := &planner.Planner{Cfg: w.cfg, Loc: loc, Now: func() time.Time { return now }}
+	q := w.drawQuery(t, now)
 	plan, err := p.Plan(q)
 	var np *planner.NotPreaggregated
 	if errors.As(err, &np) {

@@ -70,7 +70,7 @@ func timed(url, key string, uncached bool) (time.Duration, int) {
 	return time.Since(t0), resp.StatusCode
 }
 
-func runSpeed(w *world, viewers int, quick bool) {
+func runSpeed(w *world, viewers int, quick, quiet bool) {
 	rounds := 5
 	stores := w.stores
 	if quick {
@@ -80,6 +80,15 @@ func runSpeed(w *world, viewers int, quick bool) {
 		}
 	}
 	art := speedArtifact{Tier: w.tier, GeneratedAt: time.Now(), Environment: environment(), Stores: len(w.stores)}
+	art.Environment["store_app"] = "running"
+	if quiet {
+		// The per-query samples run with the store app idle, so they time the
+		// queries rather than the machine's other work. The dashboards' phase
+		// below runs with it writing again.
+		art.Environment["store_app"] = "paused during the per-query samples"
+		postJSON(appURL+"/control/rates", "", map[string]any{"paused": true}, nil)
+		time.Sleep(5 * time.Second)
+	}
 	for _, q := range speedQueries {
 		var un, ca, lg []float64
 		worst := map[int32]float64{}
@@ -117,6 +126,9 @@ func runSpeed(w *world, viewers int, quick bool) {
 		row := speedRow{Query: q.Name, Uncached: monitor.Summarise("uncached", un), Cached: monitor.Summarise("cached", ca), WorstStore: ws, Largest: monitor.Summarise("largest", lg)}
 		art.Rows = append(art.Rows, row)
 		fmt.Printf("  %-38s uncached p50 %7.1f p99 %7.1f ms   cached p50 %6.1f p99 %6.1f ms   worst store %d\n", q.Name, row.Uncached.P50, row.Uncached.P99, row.Cached.P50, row.Cached.P99, ws)
+	}
+	if quiet {
+		postJSON(appURL+"/control/rates", "", map[string]any{"paused": false}, nil)
 	}
 	// 1,000 viewers through Cuboid, as the dashboards see it.
 	if _, err := postJSON(loadgenURL+"/control", "", map[string]any{"mode": "cuboid", "viewers": viewers}, nil); err == nil {

@@ -217,9 +217,15 @@ func main() {
 	phase := fs.Duration("phase", 60*time.Second, "safety and steps: measured time per phase")
 	viewers := fs.Int("viewers", 1000, "dashboards for the loaded phases")
 	quick := fs.Bool("quick", false, "shorter runs, for the Run now button and development")
+	tier := fs.String("tier", "", "scorecard: score this tier from its saved artifacts, without a running stack")
+	quiet := fs.Bool("quiet", false, "speed: pause the store app during the per-query samples")
 	fs.Parse(os.Args[2:])
 	if cmd == "report" {
 		writeReport()
+		return
+	}
+	if cmd == "scorecard" && *tier != "" {
+		writeScorecard(&world{tier: *tier})
 		return
 	}
 	w, err := loadWorld()
@@ -230,7 +236,7 @@ func main() {
 	ctx := context.Background()
 	switch cmd {
 	case "speed":
-		runSpeed(w, *viewers, *quick)
+		runSpeed(w, *viewers, *quick, *quiet)
 	case "freshness":
 		runFreshness(w, *quick)
 	case "safety":
@@ -240,7 +246,7 @@ func main() {
 	case "growth":
 		runGrowth()
 	case "targets":
-		runSpeed(w, *viewers, *quick)
+		runSpeed(w, *viewers, *quick, *quiet)
 		runFreshness(w, *quick)
 		runCorrectness(w, *quick)
 		runSafety(w, *phase, *viewers)

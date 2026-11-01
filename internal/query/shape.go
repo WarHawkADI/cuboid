@@ -81,10 +81,12 @@ type SegInfo struct {
 	Buckets int    `json:"buckets"`
 }
 
-// EdgeInfo is a slice read row by row from the mirror.
+// EdgeInfo is a slice read row by row from the mirror. A minus slice lies in a
+// whole bucket read from the cells but outside the range, and is subtracted.
 type EdgeInfo struct {
-	From string `json:"from"`
-	To   string `json:"to"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Minus bool   `json:"minus,omitempty"`
 }
 
 func describePlan(pl *planner.Plan, loc *time.Location, cells, edgeRows float64) PlanInfo {
@@ -103,7 +105,7 @@ func describePlan(pl *planner.Plan, loc *time.Location, cells, edgeRows float64)
 		info.Segments = append(info.Segments, SegInfo{Grain: s.Grain.String(), From: timeutil.Format(s.From, loc), To: timeutil.Format(s.To, loc), Buckets: n})
 	}
 	for _, e := range pl.Edges {
-		info.Edges = append(info.Edges, EdgeInfo{From: timeutil.Format(e.From, loc), To: timeutil.Format(e.To, loc)})
+		info.Edges = append(info.Edges, EdgeInfo{From: timeutil.Format(e.From, loc), To: timeutil.Format(e.To, loc), Minus: e.Minus})
 	}
 	return info
 }

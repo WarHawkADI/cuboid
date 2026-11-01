@@ -28,7 +28,7 @@ The aggregate store, the API, the six isolation checks and company dashboards ar
 ## Consequences
 
 - **Connections and limits.** Each store costs two connections (its stream and its heartbeats) and, while it reloads, a second slot. The main server's limits rise to 250 slots and WAL senders, and 800 connections. Each stream decodes with 16 MB instead of 256 MB.
-- **WAL is read once per store.** Each slot's WAL sender reads the whole server's WAL and skips other databases' records, so decoding work grows with the number of stores. At 10M, the main server ran 101 WAL senders at about 70% CPU with the store app writing, and every store's dashboard queries ran slower on the shared machine than with one database. A bulk write in one store's database delays every other store's stream while their senders read past it: 409,000 rows rewritten in `store_43` raised another store's lag to 8.7 s.
+- **WAL is read once per store.** Each slot's WAL sender reads the whole server's WAL and skips other databases' records, so decoding work grows with the number of stores. At 10M, the main server ran 101 WAL senders at about 70% CPU with the store app writing, and every store's dashboard queries ran slower on the shared machine than with one database. With Cuboid running and no dashboards, the store app's p95 rose 35% (2.91 to 3.94 ms); at 1M, with 11 streams, 1.6%. A bulk write in one store's database delays every other store's stream while their senders read past it: 409,000 rows rewritten in `store_43` raised another store's lag to 8.7 s.
 - **One stuck stream holds WAL for all.** Every slot shares the server's WAL, so one lagging store holds it for every store. The slot alarm names that slot.
 - **Company answers span several positions.** A company's answer combines its stores at their own stream positions, and its freshness is that of its stalest store.
 - **Loads and mirror rebuilds wait for each other.** A config reload's rebuild from the mirror and a store's load cannot overlap: each waits for the other.
@@ -59,4 +59,7 @@ On the 10M tier (100 store databases), same machine:
 | `TRUNCATE` in `store_43`, slot of `store_44` dropped | Only those stores reloaded (41 s and 6 s); no other source reloaded or stopped |
 | Correctness | 150 of 150 fenced checks exact, 50 while writes ran; 30 of 30 on stores and companies |
 | Freshness | p99 1.03 s for inserts, 1.07 s for updates |
-| Speed | Every query's p99 across stores under 63 ms; 1,000 dashboards p99 1.6 ms, 0 errors. Store 42's slowest of 5 for top customers was 308 ms |
+| Speed, first runs | Every query's p99 across stores under 74 ms; 1,000 dashboards p99 1.5 ms, 0 errors. Store 42's slowest of 5 for top customers: 308 ms, then 191 ms |
+| Speed, with the current hour from its cell (ADR-007), once settled after the load | PRD examples under 28 ms on store 42, top customers' slowest of 5 47 ms; every query's p99 across stores under 54 ms; 1,000 dashboards p99 2.2 ms, 0 errors |
+| Scorecard run (`bench targets`, 1 November) | 2,500 of 2,500 checks exact, 500 during writes; freshness p99 1.1 s, 0 of 200 timed out; app p95 2.91 ms alone, 3.94 ms with Cuboid running, 3.96 ms with 1,000 dashboards through Cuboid, 11.2 ms with them on the main database |
+| Growth from the 1M tier (10 store databases) | Largest store, both tiers settled: 1.3x to 3.4x for the other PRD examples. Top customers 7.8x on its slowest of 5 (6.0 to 46.6 ms), 8.3x on its median (4.8 to 39.7 ms): T5 not met |

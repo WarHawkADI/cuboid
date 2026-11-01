@@ -36,8 +36,8 @@ While Cuboid catches up, the app is measurably slower on one machine, because bo
 No. The direct path uses the same SQL generator as the verifier, a 40-connection pool, and analytics indexes on `(tenant_id, created_at)`, `(tenant_id, status, created_at)` and `(tenant_id, product_id, created_at)`.
 
 **Which numbers should I distrust?**
-- Everything runs on one laptop, so the databases, Cuboid, the app and the load generator compete for the same cores and disk. Absolute numbers will differ on your machine.
-- A baseline app p95 under 2 ms leaves little room: 10% is a fraction of a millisecond, so run-to-run noise matters.
+- Everything runs on one machine, so the databases, Cuboid, the app and the load generator compete for the same cores and disk. Absolute numbers will differ on your machine.
+- A baseline app p95 of about 3 ms leaves little room: 10% is about a third of a millisecond, so run-to-run noise matters.
 - The store app writes far faster than the generated history, so "today" is large after a long run.
 - Cuboid has been tested at 100 stores, not 1,000.
 

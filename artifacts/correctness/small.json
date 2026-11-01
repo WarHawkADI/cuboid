@@ -1,0 +1,20 @@
+{
+  "tier": "small",
+  "generated_at": "2026-11-01T07:36:49.085703286+05:30",
+  "quiesced": {
+    "total": 2000,
+    "exact": 2000,
+    "mismatch": 0,
+    "failed": 0,
+    "errors": null,
+    "seconds": 426.424630515
+  },
+  "live": {
+    "total": 500,
+    "exact": 500,
+    "mismatch": 0,
+    "failed": 0,
+    "errors": null,
+    "seconds": 306.258614931
+  }
+}

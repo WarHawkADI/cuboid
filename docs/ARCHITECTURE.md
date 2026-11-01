@@ -22,7 +22,7 @@ flowchart LR
 1. **Stream.** `internal/cdc` reads `pgoutput` from each database's slot and assembles whole transactions. Every stream hands them to one goroutine, which owns the engine, the pending delta and the flush cadence, so the write path has no locks. A store's rows are attributed to the store whose database they were read from.
 2. **Contribute.** `internal/engine` turns each change into cell deltas: an insert adds, a delete retracts, an update retracts the old row and adds the new one. It is pure code, so the model test drives exactly what production runs.
 3. **Flush.** Every second (or sooner for a large delta), one AGG transaction writes dictionary values, mirror rows, cell deltas, the applied position of every source database it covers, data versions and security events.
-4. **Query.** `internal/planner` picks the smallest covering rollup and splits the range into whole months, days and hours, plus edge slices from the mirror.
+4. **Query.** `internal/planner` picks the smallest covering rollup and splits the range into whole months, days and hours, plus edge slices from the mirror. An edge holding more time before now than the rest of its hour is read as the hour's cell less that rest: the current hour is its cell less the rows dated after now (ADR-007).
 5. **Answer.** Each read runs under row-level security in a REPEATABLE READ transaction. Rows are asserted, then the response passes the guard.
 
 ## Why the numbers are exact
@@ -41,7 +41,7 @@ The applied LSN commits in the same transaction as the data, and only that commi
 - When new data arrives, a request gets the last answer, labelled `stale` with its true `as_of`, while one background refresh runs: for up to 2 seconds on a fixed range, and up to 30 seconds on a moving preset (see Moving ranges under load).
 - If the store cannot answer in time, for example at the peak of a rebuild, the newest answer held is served with its true age.
 - Top-N lists keyed by product or customer rank in SQL by one measure, and take the total for shares from a smaller rollup. Each verification checks this against the full result of the same snapshot.
-- Top customers, whose cost grew with the store (13.7x from 1M to 10M orders), is answered through a rank rollup: each customer's total per month, indexed by value. The range splits into whole-month cells plus thin signed slices of mirror rows. A walk down each month's largest cells, summing every customer it meets, stops once no one unseen can reach the n-th total, so it reads a few hundred customers and stays exact. A filtered list, a range of more than three months, or a walk past its work budget ranks every customer as before. `meta.plan.top_bound` says which path ran. See ADR-011.
+- Top customers, whose cost grew with the store (13.7x from 1M to 10M orders), is answered through a rank rollup: each customer's total per month, indexed by value. The range splits into whole-month cells plus thin signed slices of mirror rows. A walk down each month's largest cells, summing every customer it meets, stops once no one unseen can reach the n-th total, so it reads a few hundred customers and stays exact. A filtered list, a range of more than three months, or a walk past its work budget ranks every customer as before. `meta.plan.top_bound` says which path ran. It still grows with the store: 7.8x on the largest store from 1M to 10M. See ADR-011.
 
 ## Failure modes
 | Failure | What happens |

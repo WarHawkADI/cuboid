@@ -287,20 +287,33 @@ func QuerySQL(pl *planner.Plan, enc Encoder, loc *time.Location, n Names, only s
 			k[i] = dimExpr(cfg, src, dim, n, &j)
 		}
 		tcol, tcolumn := QuoteIdent(cfg.Tenancy.TenantColumn), QuoteIdent(src.Time)
-		var edges []string
-		for _, e := range pl.Edges {
-			edges = append(edges, fmt.Sprintf("(f.%s >= %s AND f.%s < %s)", tcolumn, arg(e.From), tcolumn, arg(e.To)))
-		}
-		where := []string{fmt.Sprintf("f.%s = ANY($1)", tcol), "(" + strings.Join(edges, " OR ") + ")"}
+		var filters []string
 		for dim, id := range filterIDs {
-			where = append(where, fmt.Sprintf("%s = %s", k[pl.FilterPos[dim]], arg(id)))
+			filters = append(filters, fmt.Sprintf("%s = %s", k[pl.FilterPos[dim]], arg(id)))
 		}
-		var ms []string
-		for i, e := range mrow {
-			ms = append(ms, e+" AS "+mcols[i])
+		// A minus edge's rows are in a cell taken whole but outside the range,
+		// so they are subtracted.
+		for _, minus := range []bool{false, true} {
+			var edges []string
+			for _, e := range pl.Edges {
+				if e.Minus == minus {
+					edges = append(edges, fmt.Sprintf("(f.%s >= %s AND f.%s < %s)", tcolumn, arg(e.From), tcolumn, arg(e.To)))
+				}
+			}
+			if len(edges) == 0 {
+				continue
+			}
+			where := append([]string{fmt.Sprintf("f.%s = ANY($1)", tcol), "(" + strings.Join(edges, " OR ") + ")"}, filters...)
+			var ms []string
+			for i, e := range mrow {
+				if minus {
+					e = "-(" + e + ")"
+				}
+				ms = append(ms, e+" AS "+mcols[i])
+			}
+			parts = append(parts, fmt.Sprintf("SELECT f.%s AS tenant_id, f.%s AS t, %s AS k1, %s AS k2, %s AS k3, %s FROM %s f\n%s\nWHERE %s",
+				tcol, tcolumn, k[0], k[1], k[2], strings.Join(ms, ", "), n.Mirror(src.Name), j.String(), strings.Join(where, " AND ")))
 		}
-		parts = append(parts, fmt.Sprintf("SELECT f.%s AS tenant_id, f.%s AS t, %s AS k1, %s AS k2, %s AS k3, %s FROM %s f\n%s\nWHERE %s",
-			tcol, tcolumn, k[0], k[1], k[2], strings.Join(ms, ", "), n.Mirror(src.Name), j.String(), strings.Join(where, " AND ")))
 	}
 	if len(parts) == 0 {
 		return "", nil, false, nil

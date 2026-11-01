@@ -375,7 +375,10 @@ func (s *sim) write(ctx context.Context, t *tenant) error {
 	r := rand.IntN(1000)
 	switch {
 	case r < 800:
-		_, err := s.placeOrder(ctx, t, orderInput{})
+		o, err := s.placeOrder(ctx, t, orderInput{})
+		if err == nil {
+			t.remember(o.OrderID)
+		}
 		return err
 	case r < 900:
 		return s.advance(ctx, t)
@@ -493,17 +496,22 @@ func (s *sim) placeOrder(ctx context.Context, t *tenant, in orderInput) (*orderO
 		if err != nil {
 			return nil, err
 		}
-		if o.Status == "placed" {
-			t.mu.Lock()
-			t.recent = append(t.recent, o.OrderID)
-			if len(t.recent) > 2000 {
-				t.recent = t.recent[len(t.recent)-2000:]
-			}
-			t.mu.Unlock()
-		}
 		return o, nil
 	}
 	return nil, errors.New("could not find a free order id")
+}
+
+// remember adds one of the simulator's own placed orders to those it moves
+// through the lifecycle. Orders placed through the API are left alone: the
+// freshness test waits to see its probe as placed, and the simulator must not
+// ship or cancel it first.
+func (t *tenant) remember(id int64) {
+	t.mu.Lock()
+	t.recent = append(t.recent, id)
+	if len(t.recent) > 2000 {
+		t.recent = t.recent[len(t.recent)-2000:]
+	}
+	t.mu.Unlock()
 }
 
 func (s *sim) tenantByID(id int32) *tenant {

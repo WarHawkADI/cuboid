@@ -5,7 +5,9 @@
 // Cubes Efficiently", 1996), then splits [from, to) greedily into whole
 // months, days and hours that rollup holds, plus at most a few thin edge
 // slices that are read row by row from the mirror. The edges are what make
-// arbitrary timestamps exact.
+// arbitrary timestamps exact. An edge whose hour holds less past time outside
+// the range than inside it is answered as the hour's cell less the rows
+// outside: the current hour is its cell less the rows dated after now.
 package planner
 
 import (
@@ -34,8 +36,13 @@ type Segment struct {
 	From, To time.Time
 }
 
-// Edge is a time slice read row by row from the mirror.
-type Edge struct{ From, To time.Time }
+// Edge is a time slice read row by row from the mirror. A Minus edge lies in a
+// bucket taken whole from the cells but outside the range: its rows are
+// subtracted.
+type Edge struct {
+	From, To time.Time
+	Minus    bool
+}
 
 // Plan says how a query is assembled.
 type Plan struct {
@@ -48,6 +55,7 @@ type Plan struct {
 	Pos []int
 	// FilterPos maps filtered dimensions to key positions.
 	FilterPos map[string]int
+	now       time.Time
 }
 
 // NotPreaggregated is returned when no rollup covers a query. Cuboid never
@@ -119,14 +127,14 @@ func (p *Planner) Plan(q *Query) (*Plan, error) {
 }
 
 func (p *Planner) planWith(q *Query, src *config.Source, r *config.Rollup) *Plan {
-	pl := &Plan{Query: q, Source: src, Rollup: r, FilterPos: map[string]int{}}
+	now := p.Now()
+	pl := &Plan{Query: q, Source: src, Rollup: r, FilterPos: map[string]int{}, now: now}
 	for _, d := range q.GroupBy {
 		pl.Pos = append(pl.Pos, r.DimIndex(d))
 	}
 	for d := range q.Filters {
 		pl.FilterPos[d] = r.DimIndex(d)
 	}
-	now := p.Now()
 	var avail []grainAvail
 	for _, g := range timeutil.Grains {
 		if !r.HasGrain(g) {
@@ -145,7 +153,83 @@ func (p *Planner) planWith(q *Query, src *config.Source, r *config.Rollup) *Plan
 	}
 	p.decompose(pl, q.From, q.To, avail)
 	pl.Edges = mergeEdges(pl.Edges)
+	p.complement(pl, now, avail)
 	return pl
+}
+
+// complement answers an edge from its finest-grain bucket's cell less the rows
+// of that bucket outside the range, when those hold less time before now than
+// the edge does. Time after now holds no rows yet, or a few dated early: the
+// current hour becomes its cell less the rows dated after now, instead of
+// every row since the hour began. Measures are sums and counts, and a flush
+// changes cells and mirror rows in one transaction, so the subtraction is
+// exact. Top-N lists do the same with month totals (ADR-011).
+func (p *Planner) complement(pl *Plan, now time.Time, avail []grainAvail) {
+	if len(avail) == 0 || len(pl.Edges) == 0 {
+		return
+	}
+	g := avail[len(avail)-1]
+	var edges []Edge
+	for _, e := range pl.Edges {
+		for bs := timeutil.Trunc(e.From, g.g, p.Loc); bs.Before(e.To); bs = timeutil.Next(bs, g.g, p.Loc) {
+			be := timeutil.Next(bs, g.g, p.Loc)
+			lo, hi := e.From, e.To
+			if lo.Before(bs) {
+				lo = bs
+			}
+			if hi.After(be) {
+				hi = be
+			}
+			held := g.since.IsZero() || !bs.Before(g.since)
+			if !held || past(bs, lo, now)+past(hi, be, now) >= past(lo, hi, now) {
+				edges = append(edges, Edge{From: lo, To: hi})
+				continue
+			}
+			pl.Segments = append(pl.Segments, Segment{Grain: g.g, From: bs, To: be})
+			if bs.Before(lo) {
+				edges = append(edges, Edge{From: bs, To: lo, Minus: true})
+			}
+			if hi.Before(be) {
+				edges = append(edges, Edge{From: hi, To: be, Minus: true})
+			}
+		}
+	}
+	pl.Edges = mergeEdges(edges)
+	pl.Segments = mergeSegments(pl.Segments)
+}
+
+// past is how much of [a, b) lies before now.
+func past(a, b, now time.Time) time.Duration {
+	if b.After(now) {
+		b = now
+	}
+	if !b.After(a) {
+		return 0
+	}
+	return b.Sub(a)
+}
+
+// mergeSegments joins touching runs of the same grain.
+func mergeSegments(ss []Segment) []Segment {
+	if len(ss) < 2 {
+		return ss
+	}
+	sort.Slice(ss, func(i, j int) bool {
+		if ss[i].Grain != ss[j].Grain {
+			return ss[i].Grain > ss[j].Grain
+		}
+		return ss[i].From.Before(ss[j].From)
+	})
+	out := []Segment{ss[0]}
+	for _, s := range ss[1:] {
+		last := &out[len(out)-1]
+		if s.Grain == last.Grain && s.From.Equal(last.To) {
+			last.To = s.To
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 type grainAvail struct {
@@ -185,7 +269,7 @@ func mergeEdges(es []Edge) []Edge {
 	out := []Edge{es[0]}
 	for _, e := range es[1:] {
 		last := &out[len(out)-1]
-		if !e.From.After(last.To) {
+		if e.Minus == last.Minus && !e.From.After(last.To) {
 			if e.To.After(last.To) {
 				last.To = e.To
 			}
@@ -209,11 +293,16 @@ func (pl *Plan) Buckets(loc *time.Location) map[timeutil.Grain]int {
 	return out
 }
 
-// EdgeDuration is the total time read row by row from the mirror.
+// EdgeDuration is the total time read row by row from the mirror. Time after
+// the plan was made holds no rows yet, so it is not counted.
 func (pl *Plan) EdgeDuration() time.Duration {
 	var d time.Duration
 	for _, e := range pl.Edges {
-		d += e.To.Sub(e.From)
+		if pl.now.IsZero() {
+			d += e.To.Sub(e.From)
+			continue
+		}
+		d += past(e.From, e.To, pl.now)
 	}
 	return d
 }

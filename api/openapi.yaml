@@ -52,7 +52,7 @@ components:
         meta:
           type: object
           properties:
-            plan: {type: object, description: 'Rollup, whole-bucket segments and mirror edges used. A top-N list found through month totals also carries top_bound: rollup, months_from_cells, slices_from_mirror, depth and keys_read (ADR-011).'}
+            plan: {type: object, description: 'Rollup, whole-bucket segments and mirror edges used. An edge with minus: true lies in a whole bucket but outside the range, and is subtracted. A top-N list found through month totals also carries top_bound: rollup, months_from_cells, slices_from_mirror, depth and keys_read (ADR-011).'}
             cache: {type: string, enum: [hit, miss, coalesced]}
             exact: {type: boolean}
             heavy: {type: boolean}

@@ -1,0 +1,21 @@
+{
+  "tier": "small",
+  "generated_at": "2026-11-01T07:36:49.084896835+05:30",
+  "insert_to_visible_ms": {
+    "name": "insert",
+    "count": 200,
+    "p50": 1042,
+    "p95": 1054,
+    "p99": 1075,
+    "max": 1075
+  },
+  "update_to_visible_ms": {
+    "name": "update",
+    "count": 200,
+    "p50": 1043,
+    "p95": 1067,
+    "p99": 1074,
+    "max": 1076
+  },
+  "timed_out": 0
+}

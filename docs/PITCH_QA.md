@@ -2,11 +2,11 @@
 
 The hardest questions we expect, each with a short answer and where to show it.
 
-1. **Did you meet every target?** Yes, at Good or better. Freshness, correctness and query speed are Great. Database safety and growth are Good. *Show: Results page.*
+1. **Did you meet every target?** Four of five, all at Great: query speed, freshness, database safety and correctness. Growth is not met. On the largest store, top customers' slowest of 5 runs grew 7.8x from 1M to 10M and its median 8.3x; every other PRD query grew 1.3x to 3.4x. The scorecard scores the slowest, and so do we. *Show: Results page.*
 
-2. **Why does top customers grow the most?** It used to read every customer in the range, about 130,000 on the largest store, and grew 13.7x. It now walks each month's largest customer totals and stops once no one else can make the list, so it reads a few hundred customers: 3.7x, and still exact. *Show: ADR-011, and `top_bound` in the plan of a top-customers answer.*
+2. **Why does top customers grow the most?** It used to read every customer in the range, about 130,000 on the largest store, and grew 13.7x. It now walks each month's largest customer totals and stops once no one else can make the list, so it reads a few hundred customers and stays exact. It still grows with the store: the largest store has 6.9 times the orders at 10M, and the answer went from 4.8 to 39.7 ms at the median, 6.0 to 46.6 ms at the slowest of 5. Timed straight after a load, before autovacuum had run, the slowest was 151 ms: slow answers came only while the machine's load average was about 32. *Show: ADR-011, and `top_bound` in the plan of a top-customers answer.*
 
-3. **Does the dashboard load slow the app?** Direct: app p95 goes to 104 ms. Through Cuboid: 0.99 to 1.16 ms, +17.5%, and +28.4% against Cuboid stopped, because everything shares one laptop's cores and disk. No dashboard query reaches the main database. *Show: recorder.*
+3. **Does the dashboard load slow the app?** Direct: app p95 goes to 11.2 ms, and dashboards wait 5.0 s at p99. Through Cuboid: 3.94 to 3.96 ms, +0.6%. Cuboid itself is not free: against Cuboid stopped (2.91 ms) it is +36.2% at 10M, because each of 101 store streams reads the whole server's WAL and everything shares one machine's cores and disk. At 1M, with 11 streams, it is +0.5%. No dashboard query reaches the main database. *Show: recorder.*
 
 4. **How do I know the numbers are right?** Press "Check against main database" on any number. It compares at an exact WAL position while writes run. 2,500 of 2,500 were exact at 10M. *Show: number drawer.*
 

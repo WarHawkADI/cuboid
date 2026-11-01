@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/img/banner.svg" alt="Cuboid: dashboards p99 3 ms, new order visible in 1.1 s, 2,500 of 2,500 exact, 0 of 1,000,000 requests crossed stores" width="100%"></p>
+<p align="center"><img src="docs/img/banner.svg" alt="Cuboid: dashboards p99 2.2 ms, new order visible in 1.1 s, 2,500 of 2,500 exact, 0 of 1,000,000 requests crossed stores" width="100%"></p>
 
 # Mitigata CyberForge submission
 
@@ -32,19 +32,21 @@ Three ideas carry the design:
 
 ## What we measured
 
-<p align="center"><img src="docs/img/safety.svg" alt="With 1,000 dashboards, app p95 is 104 ms direct and 1.16 ms through Cuboid" width="100%"></p>
+<p align="center"><img src="docs/img/safety.svg" alt="With 1,000 dashboards, app p95 is 11.2 ms direct and 3.96 ms through Cuboid" width="100%"></p>
 
-10 million orders, 100 stores, 1,000 simulated dashboards, with both databases, Cuboid, the store app and the load generator sharing one laptop (12 logical CPUs, 15.6 GB of RAM).
+Both PRD sizes: 1M orders over 10 stores and 10M orders over 100 stores, each store in its own database, with 1,000 simulated dashboards. Both database servers, Cuboid, the store app and the load generator share one machine (16 logical CPUs, 14.5 GB of RAM). The table is the 10M tier. Query speed is timed once the machine has settled after a load, at both sizes.
 
 | PRD target | Good | Great | Measured | Verdict |
 |---|---|---|---|---|
-| Query speed | Under 1 s | Under 200 ms | 1,000 dashboards: p99 3 ms, 0 errors. PRD examples: under 39 ms uncached on the largest store. Top customers: 59 ms | **Great** |
-| Freshness | Under 5 min | Under 30 s | p99 1.1 s | **Great** |
-| Database safety | Under 25% | Under 10% | App p95 0.99 to 1.16 ms, +17.5%. Against Cuboid stopped, +28.4%. Direct: 104 ms | **Good** |
+| Query speed | Under 1 s | Under 200 ms | 1,000 dashboards: p99 2.2 ms, 0 errors. PRD examples: under 28 ms uncached on the largest store. Top customers: median 40 ms, slowest of 5 47 ms | **Great** |
+| Freshness | Under 5 min | Under 30 s | p99 1.1 s, 0 of 200 timed out | **Great** |
+| Database safety | Under 25% | Under 10% | App p95 3.94 to 3.96 ms, +0.6%. Against Cuboid stopped (2.91 ms), +36.2%. Direct: 11.2 ms | **Great** |
 | Correctness | Most queries | All queries | 2,500 of 2,500 exact, 500 during writes | **Great** |
-| Growth, 1M to 10M | Under 5x | Under 2x | 1.2x to 3.2x on the PRD's examples. Top customers: 3.7x | **Good** |
+| Growth, 1M to 10M | Under 5x | Under 2x | 1.3x to 3.4x on the other PRD examples. Top customers: 7.8x on its slowest of 5 runs; its median grew 8.3x | **Not met** |
 
-| Attack or failure | Result, at 10M orders |
+The 1M tier met the first four at Great too: every query's p99 under 16 ms uncached, freshness p99 1.1 s, app p95 +0.5% against Cuboid stopped, 2,500 of 2,500 exact.
+
+| Attack or failure | Result |
 |---|---|
 | 1,000,000 randomized requests, 57,153 cancelled mid-flight | 0 crossed stores |
 | Leak drills A, B, C: a shared cache, a connection mix-up, a missing tenant setting | 0 leaked |
@@ -52,9 +54,13 @@ Three ideas carry the design:
 | 30 red-team checks: bad keys, injection, row security, recategorising, order moves | 30 of 30 pass |
 | 23 acceptance checks: the PRD's examples, both rebuilds, flood, live metric, drills | 23 of 23 pass |
 
-**The slowest row.** Top customers had about 130,000 groups on the largest store and grew 13.7x. It now walks each month's largest customer totals and stops once no one else can make the list, reading a few hundred customers, and every list is still checked against the full result ([ADR-011](docs/adr/ADR-011-exact-top-n.md)). At 3.7x, re-measured at both tiers on a 16-CPU machine, it is Good, not Great.
+These ran at 10M with all stores in one database. With a database per store, at 1M: 8 `kill -9`s left 200 of 200 checks exact, 30 of 30 red-team checks passed (R8 now checks that a store's database refuses another store's row), and 23 of 23 acceptance checks.
 
-<p align="center"><img src="docs/img/growth.svg" alt="Growth from 1M to 10M orders on the largest store" width="90%"></p>
+**The slowest row.** Top customers had about 130,000 groups on the largest store and grew 13.7x. It now walks each month's largest customer totals and stops once no one else can make the list, reading a few hundred customers, and every list is still checked against the full result ([ADR-011](docs/adr/ADR-011-exact-top-n.md)). It still grows with the store: the largest store has 6.9 times the orders at 10M, and its median went from 4.8 to 39.7 ms, its slowest of 5 from 6.0 to 46.6 ms. That is 7.8x, which misses the growth target. Timed straight after the load, before autovacuum had run, it measured 11.4x (13.3 to 151 ms).
+
+**Ranges that end now.** "Today", "last 7 days" and "this week" end inside the current hour. That hour used to be read row by row, so the same query slowed as the hour went on: 44 minutes in, top products took 125 ms on the 1M tier. The current hour is now its rollup cell less the rows dated after now, usually none, so it costs the same at any minute ([ADR-007](docs/adr/ADR-007-mirror-and-edges.md)).
+
+<p align="center"><img src="docs/img/growth.svg" alt="Growth from 1M to 10M orders on the largest store: 1.3x to 3.4x on the other queries, 7.8x on top customers" width="90%"></p>
 
 ## How it is built
 

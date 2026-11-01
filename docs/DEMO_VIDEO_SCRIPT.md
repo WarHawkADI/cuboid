@@ -58,4 +58,4 @@ About 2 minutes 40 seconds, roughly 370 words. One voice, calm and unhurried: th
 ## What the video must not imply
 - The YAML build takes about a minute at 10M. If it is shortened, a caption says so.
 - The data, the store app's traffic and the dashboards' traffic are simulated. Replication, rollups, checks and injected faults are real.
-- "About one millisecond" and "about a hundred" are the measured 1.16 ms and 104 ms. The live recording may read a little differently: it is live.
+- The recording was made with all stores in one database. Its figures are from that layout: "about one millisecond" and "about a hundred" are the measured 1.16 ms and 104 ms, and beat 8 calls growth Good at under four times. With a database per store, app p95 is 3.96 ms through Cuboid against 11.2 ms direct, and growth is Not met: top customers' slowest run grew 7.8x. Re-record beat 8 before the video is shown as current.

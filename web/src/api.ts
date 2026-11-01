@@ -26,7 +26,8 @@ export interface Segment {
 export interface PlanInfo {
   rollup?: string;
   segments: Segment[];
-  edges: { from: string; to: string }[];
+  // A minus edge lies in a whole bucket but outside the range: it is subtracted.
+  edges: { from: string; to: string; minus?: boolean }[];
   cells_estimate: number;
   edge_rows_estimate: number;
   // Set when a top-N list was found by walking month totals (ADR-011).

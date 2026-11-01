@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/img/banner.svg" alt="Cuboid: dashboards p99 3 ms, new order visible in 1.1 s, 2,500 of 2,500 exact, 0 of 1,000,000 requests crossed stores" width="100%">
+  <img src="docs/img/banner.svg" alt="Cuboid: dashboards p99 2.2 ms, new order visible in 1.1 s, 2,500 of 2,500 exact, 0 of 1,000,000 requests crossed stores" width="100%">
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@ One button drives this through the real APIs, at 10M orders. The [narrated demo 
 
 <p align="center"><img src="docs/img/before-after.svg" alt="Before: dashboards and the store app compete on the main database. After: dashboards read an aggregate store fed by the change stream." width="100%"></p>
 
-<p align="center"><img src="docs/img/safety.svg" alt="With 1,000 dashboards, app p95 is 104 ms direct and 1.16 ms through Cuboid; dashboard p99 is 5.4 s direct and 5.7 ms through Cuboid; the app does 54 operations a second direct and 184 through Cuboid" width="100%"></p>
+<p align="center"><img src="docs/img/safety.svg" alt="With 1,000 dashboards, app p95 is 11.2 ms direct and 3.96 ms through Cuboid; dashboard p99 is 5.0 s direct and 1.2 ms through Cuboid; the app does about 186 operations a second either way" width="100%"></p>
 
 ## Why it is different
 
@@ -45,7 +45,7 @@ One button drives this through the real APIs, at 10M orders. The [narrated demo 
 | **Every number is provable** | Press "Check against main database" on any figure. It compares at an exact WAL position, while writes run. This check found a real bug that unit tests could not |
 | **Tested by breaking it** | Three drills inject INC-02's failure modes into Cuboid's own code: 0 leaked. 1,000,000 randomized requests with cancellations: 0 crossed stores. 20 `kill -9`s under writes: 500 of 500 checks exact |
 | **New metrics are config** | One line of YAML build a new breakdown from the mirror, live in about a minute at 10M, with no restart and no load on the main database |
-| **Honest about its limits** | Every target is met, and [the scorecard](#the-targets-scorecard) says which are only Good. [The final report](docs/FINAL_REPORT.md) lists what was left out |
+| **Honest about its limits** | Four of five targets are met at Great. Growth is not: [the scorecard](#the-targets-scorecard) shows top customers' slowest answer growing 7.8x. [The final report](docs/FINAL_REPORT.md) lists what was left out |
 
 Built for Mitigata CyberForge, Problem 02, by team iiitdards: Aditya Rai and Bhuvan Raju. The submission summary is in [HACKATHON.md](HACKATHON.md).
 
@@ -176,26 +176,25 @@ UPDATE orders SET status = 'cancelled' WHERE tenant_id = 42 AND order_id = 90000
 
 ## The targets scorecard
 
-Measured at 10M orders and 100 stores, with every service sharing one laptop (12 logical CPUs, 15.6 GB of RAM). Generated from `artifacts/`; see `docs/TARGETS.md`.
+Measured on 1 November 2026 at both PRD sizes: 1M orders over 10 stores, and 10M orders over 100 stores, each store in its own database (ADR-012). Every service shares one machine (16 logical CPUs, 14.5 GB of RAM). The table is the 10M tier; the 1M tier gives the growth ratios. Query speed is timed once the machine has settled after a load: no autovacuum running and a load average under 4 for a minute, at both sizes. Generated from `artifacts/`; see `docs/TARGETS.md`.
 
 | What we measure | Good | Great | Measured | Verdict |
 |---|---|---|---|---|
-| Query speed | Under 1 s | Under 200 ms | With 1,000 dashboards: p99 3 ms, 0 errors. PRD examples under 39 ms uncached on the largest store. Top customers over 30 days: 59 ms uncached | **Great** |
-| Freshness | Under 5 min | Under 30 s | p99 1.1 s, inserts and updates | **Great** |
-| Database safety | Under 25% slower | Under 10% slower | App p95 0.99 to 1.16 ms with 1,000 dashboards, +17.5%. Against Cuboid stopped (0.91 ms), +28.4%. Direct: 104 ms | **Good** |
+| Query speed | Under 1 s | Under 200 ms | With 1,000 dashboards: p99 2.2 ms, 0 errors. PRD examples under 28 ms uncached on the largest store. Top customers over 30 days: median 40 ms, slowest of 5 47 ms | **Great** |
+| Freshness | Under 5 min | Under 30 s | p99 1.1 s, inserts and updates; 0 of 200 timed out | **Great** |
+| Database safety | Under 25% slower | Under 10% slower | App p95 3.94 to 3.96 ms with 1,000 dashboards, +0.6%. Against Cuboid stopped (2.91 ms), +36.2%. Direct: 11.2 ms | **Great** |
 | Correctness | Most queries | All queries | 2,500 of 2,500 exact, 500 of them during writes | **Great** |
-| Growth | Under 5x | Under 2x | Largest store: 1.2x to 3.2x for PRD examples. Top customers: 3.7x | **Good** |
+| Growth | Under 5x | Under 2x | Largest store: 1.3x to 3.4x for the other PRD examples. Top customers: 7.8x on its slowest of 5 runs (6.0 to 46.6 ms); its median grew 8.3x | **Not met** |
 
-The scorecard above was measured with all stores in one database. With a database per store (ADR-012) at 10M, the same machine also runs 101 replication streams: every query's p99 across stores stayed under 63 ms and 1,000 dashboards' p99 at 1.6 ms, but the largest store's slowest top-customers answer was 308 ms, over the 200 ms Great line. Correctness (150 of 150) and freshness (p99 1.07 s) held.
+<p align="center"><img src="docs/img/growth.svg" alt="Growth from 1M to 10M orders on the largest store: 1.3x to 3.4x on the other queries, 7.8x on top customers, which misses the target" width="90%"></p>
 
-<p align="center"><img src="docs/img/growth.svg" alt="Growth from 1M to 10M orders on the largest store: 1.2x to 3.2x on most queries, 3.7x on top customers" width="90%"></p>
+The weak spots, plainly:
 
-The two weak spots, plainly:
-
-- **Top customers.** It used to read every customer in the range and grew 13.7x. It now walks each month's largest customer totals and stops once no one else can make the list ([ADR-011](docs/adr/ADR-011-exact-top-n.md)), so it reads a few hundred customers and stays exact. At 3.7x it is still the slowest-growing query: Good, not Great. It was re-measured at both tiers on a 16-CPU machine.
+- **Top customers.** It used to read every customer in the range. It now walks each month's largest customer totals and stops once no one else can make the list ([ADR-011](docs/adr/ADR-011-exact-top-n.md)), so it stays exact without reading every customer. It still grows with the store: on the largest store, which has 6.9 times the orders at 10M, its median went from 4.8 ms to 39.7 ms and its slowest of 5 from 6.0 to 46.6 ms, 7.8x, which misses the growth target. Timed straight after the load, before autovacuum had run, the same query measured 13.3 and 151 ms (11.4x).
+- **Cuboid's own cost to the store app.** Each store's stream has its own WAL sender, and each sender reads the whole server's WAL, so the cost grows with the number of stores. At 10M, with 101 streams, Cuboid running and no dashboards raised the app's p95 35% (2.91 to 3.94 ms); at 1M, with 11 streams, 1.6%. 1,000 dashboards through Cuboid add 0.6% on top; the same dashboards on the main database take it to 11.2 ms.
 - **Moving ranges under load.** Under heavy dashboard load, a preset such as `last_7d` refreshes about every 5 seconds, so viewers do not queue behind recomputation. Every answer states its true age. Fixed ranges see new orders in about a second.
 
-Also measured at 10M: 1,000,000 randomized requests with 0 crossing stores, and 20 `kill -9`s under writes, back within 3.1 s with 500 of 500 checks exact. Method and raw numbers: `docs/BENCHMARKS.md`. The "Run now" button on `/monitor` re-measures speed, freshness and correctness in about a minute.
+Also measured at 10M, with all stores in one database: 1,000,000 randomized requests with 0 crossing stores, and 20 `kill -9`s under writes, back within 3.1 s with 500 of 500 checks exact. With a database per store, 8 `kill -9`s at 1M left 200 of 200 checks exact. The 1M tier on its own: 2,500 of 2,500 exact, freshness p99 1.1 s, app p95 +0.5% against Cuboid stopped, and every query's p99 under 16 ms uncached. Its 1,000 dashboards fall on 10 stores, 100 each, and the per-store limit turned away 1,774 requests with a 429; at 10M, none. Method and raw numbers: `docs/BENCHMARKS.md`. The "Run now" button on `/monitor` re-measures speed, freshness and correctness in about a minute.
 
 ## The bonuses
 
@@ -240,13 +239,15 @@ sequenceDiagram
 ```
 
 ### Top customers without reading every customer
-A customer list used to read one cell per customer and day in the range, so it grew with the store: 13.7x from 1M to 10M orders. A rank rollup now keeps each customer's total per month. The range splits into whole-month cells plus thin signed slices of rows, and a walk down each month's largest cells stops once no one else can reach the n-th total. It reads a few hundred customers and returns the same list as ranking all of them, ties included. `meta.plan.top_bound` shows when it ran. The proof and the limits are in [ADR-011](docs/adr/ADR-011-exact-top-n.md).
+A customer list used to read one cell per customer and day in the range, so it grew with the store: 13.7x from 1M to 10M orders. A rank rollup now keeps each customer's total per month. The range splits into whole-month cells plus thin signed slices of rows, and a walk down each month's largest cells stops once no one else can reach the n-th total. It reads a few hundred customers and returns the same list as ranking all of them, ties included. `meta.plan.top_bound` shows when it ran. It still grows with the store, 7.8x on the largest store from 1M to 10M, and is the one query that misses the growth target. The proof and the limits are in [ADR-011](docs/adr/ADR-011-exact-top-n.md).
 
 ### Each store in its own database
 Each store's data sits in its own database, created from a template and pinned to that store by `CHECK` constraints, so no row of another store can be written there. Cuboid streams each database with its own slot and position. A `TRUNCATE`, a lost slot or a failed check reloads only that store, and stores load in parallel, each in one transaction. A store added to the registry is streaming within seconds, with no restart. See [ADR-012](docs/adr/ADR-012-database-per-store.md).
 
 ### Any time range, exact
 <p align="center"><img src="docs/img/range-slice.svg" alt="A range is tiled with mirror edges, hours, days and months" width="100%"></p>
+
+A range that ends now reads the current hour as its cell less the rows dated after now, usually none, instead of every row since the hour began. Its cost no longer depends on the minute of the hour it is asked ([ADR-007](docs/adr/ADR-007-mirror-and-edges.md)).
 
 ### Proving a number
 A check writes a fence into the WAL, waits for Cuboid to reach it, and compares both answers at that point, accounting for transactions still in flight. It has caught a real bug: a commit straight after a heartbeat shares its LSN and looked already applied, which lost 2 orders in three minutes.
@@ -289,7 +290,7 @@ flowchart LR
 | A store's table is truncated, or its slot is lost | Only that store reloads from its database; every other store keeps streaming | 1M: store 43 truncated and store 44's slot dropped, no other store reloaded or stopped |
 | A store is added or removed | Streamed within seconds, or purged, with no restart | 1M: a new store streaming 2.7 s after it was registered |
 | A bad config is saved | The old config stays live, and the error names the line | Config tests |
-| The aggregate store is too busy | The last exact answer is served, labelled with its age | Dashboards' p99 3 ms under load |
+| The aggregate store is too busy | The last exact answer is served, labelled with its age | Dashboards' p99 2.2 ms under load (10M) |
 | A replication slot falls behind | An alarm at 1 GB naming the slot, and a 4 GB cap protects the main server's disk | Set and coded; not forced in a test |
 
 ### The techniques the PRD names

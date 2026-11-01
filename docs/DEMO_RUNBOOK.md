@@ -27,8 +27,8 @@ About 4 minutes. Open <http://localhost:8080/monitor>, press **Run demo**, and p
 Beat 9 waits for the YAML rollup to finish building, about a minute at 10M, so talk through the scorecard and Results page while it builds. Before the demo, you can also show the **SOC alerts** switch on a store page and **Run now** on the scorecard, which takes about 30 seconds. The store page's chart spikes on today because the store app has been writing all day: say so if asked.
 
 ## Do not claim
-- That the app stays under the 10% line with 1,000 dashboards. It measured +17.5%, Good rather than Great, and +28.4% against Cuboid stopped.
-- That Growth is Great. Top customers is 3.7x on the largest store: Good.
+- That Cuboid costs the app nothing. 1,000 dashboards through Cuboid measured +0.6%, Great, but against Cuboid stopped the app is +36.2% at 10M.
+- That Growth is met. Top customers' slowest run on the largest store grew 7.8x: Not met. Its median grew 8.3x.
 - That a clean clone starts with Docker, until `make docker-clean-clone-check` has passed. The stack itself has run under Compose.
 - 1,000-tenant scale. It has been tested at 100.
 
